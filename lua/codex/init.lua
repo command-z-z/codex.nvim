@@ -16,6 +16,14 @@ function M.setup(opts)
         require("codex.ui").open()
     end, {})
 
+    vim.api.nvim_create_user_command("CodexToggle", function()
+        require("codex.ui").toggle()
+    end, {})
+
+    vim.api.nvim_create_user_command("CodexClose", function()
+        require("codex.ui").close()
+    end, {})
+
     vim.api.nvim_create_user_command("CodexAsk", function(command)
         local prompt = command.args
         if prompt == "" then
@@ -46,9 +54,14 @@ function M.setup(opts)
         require("codex.ui").diff()
     end, {})
 
+    vim.api.nvim_create_user_command("CodexDiffToggle", function()
+        require("codex.ui").diff_toggle()
+    end, {})
+
     vim.api.nvim_create_user_command("CodexApply", function()
         local ok, message = require("codex.diff").apply(require("codex.context").cwd())
         if ok then
+            vim.cmd("checktime")
             vim.notify("Applied accepted Codex hunks", vim.log.levels.INFO, { title = "codex.nvim" })
         else
             vim.notify(message, vim.log.levels.ERROR, { title = "codex.nvim" })
@@ -57,6 +70,10 @@ function M.setup(opts)
 
     vim.api.nvim_create_user_command("CodexCLI", function(command)
         require("codex.cli").open_tui(split_args(command.args))
+    end, { nargs = "*" })
+
+    vim.api.nvim_create_user_command("CodexCLIToggle", function(command)
+        require("codex.cli").toggle_tui(split_args(command.args))
     end, { nargs = "*" })
 
     vim.api.nvim_create_user_command("CodexResume", function(command)

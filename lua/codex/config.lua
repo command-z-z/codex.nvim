@@ -7,6 +7,9 @@ M.defaults = {
         layout = "right",
         width = 0.38,
         border = "rounded",
+        progress = {
+            mode = "compact",
+        },
     },
     edit = {
         mode = "manual",

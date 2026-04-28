@@ -3,12 +3,79 @@ local context = require("codex.context")
 
 local M = {}
 
+local state = {
+    bufnr = nil,
+    winid = nil,
+}
+
 local function executable()
     return config.options.codex_cmd or "codex"
 end
 
 local function notify_error(message)
     vim.notify(message, vim.log.levels.ERROR, { title = "codex.nvim" })
+end
+
+local function terminal_running()
+    if not state.bufnr or not vim.api.nvim_buf_is_valid(state.bufnr) then
+        return false
+    end
+
+    local job_id = vim.b[state.bufnr].terminal_job_id
+    if not job_id then
+        return false
+    end
+
+    return vim.fn.jobwait({ job_id }, 0)[1] == -1
+end
+
+local function setup_terminal_keymaps(bufnr)
+    local opts = { buffer = bufnr, silent = true }
+
+    vim.keymap.set("t", "jk", [[<C-\><C-n>]], vim.tbl_extend("force", opts, {
+        desc = "Leave Codex terminal input mode",
+    }))
+    vim.keymap.set("t", "<C-q>", [[<C-\><C-n><Cmd>lua require("codex.cli").toggle_tui()<CR>]], vim.tbl_extend("force", opts, {
+        desc = "Close Codex terminal window",
+    }))
+    vim.keymap.set("n", "q", M.toggle_tui, vim.tbl_extend("force", opts, {
+        desc = "Close Codex terminal window",
+    }))
+end
+
+local function cleanup_terminal(bufnr)
+    if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+        return
+    end
+
+    for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
+        if vim.api.nvim_win_is_valid(winid) then
+            pcall(vim.api.nvim_win_close, winid, true)
+        end
+    end
+
+    if vim.api.nvim_buf_is_valid(bufnr) then
+        pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+    end
+
+    if state.bufnr == bufnr then
+        state.bufnr = nil
+        state.winid = nil
+    end
+end
+
+local function setup_terminal_cleanup(bufnr)
+    vim.bo[bufnr].buflisted = false
+
+    vim.api.nvim_create_autocmd("TermClose", {
+        buffer = bufnr,
+        once = true,
+        callback = function()
+            vim.schedule(function()
+                cleanup_terminal(bufnr)
+            end)
+        end,
+    })
 end
 
 function M.check()
@@ -95,6 +162,24 @@ function M.open_tui(args)
         return
     end
 
+    if state.winid and vim.api.nvim_win_is_valid(state.winid) then
+        vim.api.nvim_set_current_win(state.winid)
+        vim.cmd("startinsert")
+        return
+    end
+
+    if state.bufnr and vim.api.nvim_buf_is_valid(state.bufnr) and terminal_running() then
+        vim.cmd("botright split")
+        vim.cmd("resize " .. math.floor(vim.o.lines * 0.35))
+        vim.api.nvim_win_set_buf(0, state.bufnr)
+        state.winid = vim.api.nvim_get_current_win()
+        setup_terminal_keymaps(state.bufnr)
+        vim.cmd("startinsert")
+        return
+    end
+    state.bufnr = nil
+    state.winid = nil
+
     args = args or {}
     local cwd = context.cwd()
     local cmd = executable()
@@ -111,11 +196,30 @@ function M.open_tui(args)
     vim.cmd("botright split")
     vim.cmd("resize " .. math.floor(vim.o.lines * 0.35))
     vim.cmd("terminal " .. table.concat(command_parts, " "))
+    local bufnr = vim.api.nvim_get_current_buf()
+    state.bufnr = bufnr
+    state.winid = vim.api.nvim_get_current_win()
+    setup_terminal_cleanup(bufnr)
+    setup_terminal_keymaps(bufnr)
     vim.cmd("startinsert")
 end
 
+function M.toggle_tui(args)
+    if state.winid and vim.api.nvim_win_is_valid(state.winid) then
+        vim.api.nvim_win_close(state.winid, true)
+        state.winid = nil
+        return
+    end
+
+    M.open_tui(args)
+end
+
 function M.resume(args)
-    args = vim.list_extend({ "resume" }, args or {})
+    args = args or {}
+    if #args == 0 then
+        args = { "--all" }
+    end
+    args = vim.list_extend({ "resume" }, args)
     M.open_tui(args)
 end
 

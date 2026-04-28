@@ -96,6 +96,20 @@ use({
 | `:CodexCLI [args...]` | Open the original Codex TUI |
 | `:CodexResume [args...]` | Open `codex resume` in a terminal split |
 
+Inside `:CodexCLI` / `:CodexResume`:
+
+| Key | Action |
+| --- | --- |
+| `jk` / `<C-\><C-n>` | Leave terminal input mode so you can scroll or run Vim commands |
+| `i` | Return to terminal input mode |
+| `<C-u>` / `<C-d>` | Scroll earlier/later output after leaving terminal input mode |
+| `G` | Jump back to the latest terminal output |
+| `q` | Close the Codex terminal split after leaving terminal input mode |
+| `<C-q>` | Close the Codex terminal split directly from terminal input mode |
+
+If Codex uses the alternate screen and older output disappears, set
+`cli.no_alt_screen = true`.
+
 ## 🧬 Diff Review
 
 Manual edit mode runs Codex in `read-only` sandbox mode and asks for a unified
