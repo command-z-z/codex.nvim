@@ -587,6 +587,21 @@ local function run_prompt(prompt, opts)
     })
 end
 
+local function open_diff_from_message(final_message, opts)
+    opts = opts or {}
+    local patch = diff.extract_patch(final_message)
+    if patch == "" and opts.fallback_git_diff then
+        patch = context.git_diff(state.cwd)
+    end
+    if patch == "" then
+        return false
+    end
+
+    diff.set_patch(patch)
+    M.diff()
+    return true
+end
+
 function M.ask(prompt, opts)
     opts = opts or {}
     local full_prompt = context.build_prompt(prompt, {
@@ -596,34 +611,15 @@ function M.ask(prompt, opts)
     })
     run_prompt(full_prompt, {
         display_prompt = prompt,
-        sandbox = "read-only",
+        sandbox = opts.sandbox or config.options.chat.sandbox,
+        on_final = function(final_message)
+            open_diff_from_message(final_message)
+        end,
     })
 end
 
-function M.edit(prompt)
-    local mode = config.options.edit.mode
-    local sandbox = config.options.edit.sandbox.manual
-    if mode == "auto" then
-        sandbox = config.options.edit.sandbox.auto
-    end
-
-    local full_prompt = mode == "auto" and context.auto_edit_prompt(prompt) or context.edit_prompt(prompt)
-    run_prompt(full_prompt, {
-        display_prompt = prompt,
-        sandbox = sandbox,
-        on_final = function(final_message)
-            local patch = diff.extract_patch(final_message)
-            if patch == "" and mode == "auto" then
-                patch = context.git_diff(state.cwd)
-            end
-            if patch == "" then
-                vim.notify("No patch found in Codex response", vim.log.levels.WARN, { title = "codex.nvim" })
-                return
-            end
-            diff.set_patch(patch)
-            M.diff()
-        end,
-    })
+function M._open_diff_from_message(final_message, opts)
+    return open_diff_from_message(final_message, opts)
 end
 
 local function diff_view_lines()

@@ -25,6 +25,25 @@ describe("codex.cli", function()
         assert.are.same({ "resume" }, captured)
     end)
 
+    it("skips git repo checks for exec json by default", function()
+        local args = cli._build_exec_args({ sandbox = "read-only" }, "/tmp/project", "/tmp/out")
+
+        assert.is_not_nil(vim.tbl_contains(args, "--skip-git-repo-check"))
+        assert.are.equal("-", args[#args])
+    end)
+
+    it("can keep git repo checks for exec json when configured", function()
+        config.setup({
+            exec = {
+                skip_git_repo_check = false,
+            },
+        })
+
+        local args = cli._build_exec_args({ sandbox = "read-only" }, "/tmp/project", nil)
+
+        assert.is_false(vim.tbl_contains(args, "--skip-git-repo-check"))
+    end)
+
     it("does not create terminal-mode mappings by default", function()
         local bufnr = vim.api.nvim_create_buf(false, true)
         vim.api.nvim_set_current_buf(bufnr)

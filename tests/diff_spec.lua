@@ -1,5 +1,4 @@
 local diff = require("codex.diff")
-local context = require("codex.context")
 
 describe("codex.diff", function()
     it("parses files and hunks", function()
@@ -45,10 +44,5 @@ describe("codex.diff", function()
     it("extracts fenced diff", function()
         local patch = diff.extract_patch("summary\n```diff\ndiff --git a/x b/x\n--- a/x\n+++ b/x\n```\n")
         assert.are.equal("diff --git a/x b/x\n--- a/x\n+++ b/x", patch)
-    end)
-
-    it("does not include git diff in edit prompts", function()
-        assert.is_nil(context.edit_prompt("change this"):find("<git_diff>", 1, true))
-        assert.is_nil(context.auto_edit_prompt("change this"):find("<git_diff>", 1, true))
     end)
 end)

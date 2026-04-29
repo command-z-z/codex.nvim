@@ -106,3 +106,54 @@ describe("codex.ui display lines", function()
         end)
     end)
 end)
+
+describe("codex.ui chat sandbox", function()
+    before_each(function()
+        config.setup()
+    end)
+
+    it("uses workspace-write for chat prompts by default", function()
+        local cli = require("codex.cli")
+        local original_exec_json = cli.exec_json
+        local captured
+        cli.exec_json = function(_, opts)
+            captured = opts
+            if opts.on_exit then
+                opts.on_exit(0, {}, {}, "")
+            end
+        end
+
+        ui.ask("change this")
+
+        cli.exec_json = original_exec_json
+        assert.are.equal("workspace-write", captured.sandbox)
+    end)
+end)
+
+describe("codex.ui diff handoff", function()
+    it("opens diff review state when chat returns a patch", function()
+        local diff = require("codex.diff")
+        local original_diff = ui.diff
+        local opened = false
+        ui.diff = function()
+            opened = true
+        end
+
+        local handled = ui._open_diff_from_message(table.concat({
+            "summary",
+            "```diff",
+            "diff --git a/a.lua b/a.lua",
+            "--- a/a.lua",
+            "+++ b/a.lua",
+            "@@ -1 +1 @@",
+            "-old",
+            "+new",
+            "```",
+        }, "\n"))
+
+        ui.diff = original_diff
+        assert.is_true(handled)
+        assert.is_true(opened)
+        assert.are.equal(1, #diff.get_state().files)
+    end)
+end)

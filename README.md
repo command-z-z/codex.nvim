@@ -43,11 +43,7 @@ Optional:
     "MunifTanjim/nui.nvim",
   },
   config = function()
-    require("codex").setup({
-      edit = {
-        mode = "manual", -- "manual" | "auto"
-      },
-    })
+    require("codex").setup()
   end,
 }
 ```
@@ -125,8 +121,8 @@ terminal-mode keys by default; set `cli.keymaps.terminal_escape` or
 
 ## 🧬 Diff Review
 
-Manual edit mode runs Codex in `read-only` sandbox mode and asks for a unified
-diff. The patch is parsed into files and hunks before anything is applied.
+When Codex chat returns a unified diff, the patch is parsed into files and
+hunks before anything is applied.
 
 Inside `:CodexDiff`:
 
@@ -158,13 +154,11 @@ require("codex").setup({
   keymaps = {
     visual_context = "<leader>aq",
   },
-  edit = {
-    mode = "manual", -- "manual" | "auto"
-    confirm = "hunk",
-    sandbox = {
-      manual = "read-only",
-      auto = "workspace-write",
-    },
+  exec = {
+    skip_git_repo_check = true,
+  },
+  chat = {
+    sandbox = "workspace-write",
   },
   cli = {
     terminal = "native",

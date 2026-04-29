@@ -114,23 +114,4 @@ function M.build_prompt(user_prompt, opts)
     return table.concat(parts, "\n")
 end
 
-function M.edit_prompt(user_prompt)
-    return table.concat({
-        "You are editing code for a Neovim user.",
-        "Return a concise summary and a unified diff patch only.",
-        "The patch must apply cleanly with git apply from the repository root.",
-        M.build_prompt(user_prompt, { include_buffer = false, include_git_diff = false }),
-    }, "\n\n")
-end
-
-function M.auto_edit_prompt(user_prompt)
-    return table.concat({
-        "You are editing code for a Neovim user.",
-        "Modify files directly in the workspace.",
-        "Keep the change tightly scoped to the user's request.",
-        "After editing, summarize the files changed and any verification performed.",
-        M.build_prompt(user_prompt, { include_buffer = false, include_git_diff = false }),
-    }, "\n\n")
-end
-
 return M

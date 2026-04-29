@@ -18,13 +18,11 @@ M.defaults = {
     keymaps = {
         visual_context = "<leader>aq",
     },
-    edit = {
-        mode = "manual",
-        confirm = "hunk",
-        sandbox = {
-            manual = "read-only",
-            auto = "workspace-write",
-        },
+    exec = {
+        skip_git_repo_check = true,
+    },
+    chat = {
+        sandbox = "workspace-write",
     },
     cli = {
         terminal = "native",

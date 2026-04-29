@@ -150,6 +150,38 @@ local function build_tui_args(args, cwd)
     return command_args
 end
 
+local function build_exec_args(opts, cwd, output_file)
+    local args = {
+        "exec",
+        "--json",
+        "--color",
+        "never",
+        "-C",
+        cwd,
+        "--sandbox",
+        opts.sandbox or config.options.chat.sandbox,
+    }
+
+    local exec_options = config.options.exec or {}
+    if exec_options.skip_git_repo_check ~= false then
+        args[#args + 1] = "--skip-git-repo-check"
+    end
+
+    if output_file then
+        vim.list_extend(args, { "--output-last-message", output_file })
+    end
+
+    if opts.model then
+        vim.list_extend(args, { "--model", opts.model })
+    end
+    if opts.profile then
+        vim.list_extend(args, { "--profile", opts.profile })
+    end
+
+    args[#args + 1] = "-"
+    return args
+end
+
 function M.check()
     if vim.fn.executable(executable()) ~= 1 then
         notify_error("Codex CLI not found: " .. executable())
@@ -166,28 +198,7 @@ function M.exec_json(prompt, opts)
 
     local cwd = opts.cwd or context.cwd()
     local output_file = opts.output_last_message and vim.fn.tempname() or nil
-    local args = {
-        "exec",
-        "--json",
-        "--color",
-        "never",
-        "-C",
-        cwd,
-        "--sandbox",
-        opts.sandbox or config.options.edit.sandbox.manual,
-        "-",
-    }
-
-    if output_file then
-        vim.list_extend(args, { "--output-last-message", output_file })
-    end
-
-    if opts.model then
-        vim.list_extend(args, { "--model", opts.model })
-    end
-    if opts.profile then
-        vim.list_extend(args, { "--profile", opts.profile })
-    end
+    local args = build_exec_args(opts, cwd, output_file)
 
     local Job = require("plenary.job")
     local stdout = {}
@@ -278,6 +289,10 @@ end
 
 function M._build_tui_args(args, cwd)
     return build_tui_args(args, cwd)
+end
+
+function M._build_exec_args(opts, cwd, output_file)
+    return build_exec_args(opts or {}, cwd, output_file)
 end
 
 function M._setup_terminal_keymaps(bufnr)
