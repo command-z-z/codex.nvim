@@ -89,26 +89,39 @@ use({
 | Command | Description |
 | --- | --- |
 | `:Codex` | Open the native Codex side panel |
-| `:CodexAsk [prompt]` | Ask about current context or visual selection |
-| `:CodexEdit [prompt]` | Ask Codex to produce or apply a code edit |
 | `:CodexDiff` | Open the pending hunk review UI |
 | `:CodexApply` | Apply accepted hunks |
 | `:CodexCLI [args...]` | Open the original Codex TUI |
-| `:CodexResume [args...]` | Open `codex resume` in a terminal split |
+| `:CodexResume [args...]` | Open `codex resume` in the current cwd |
+
+## 💬 Chat Context
+
+Select code in visual mode and press `<leader>aq` to attach that selection to
+the Codex chat prompt. The chat history shows a compact context summary with
+the file, line range, and line count; the full selected code is kept out of the
+visible history and sent only with your next prompt.
+
+Inside the chat UI, `<C-k>` focuses the output window from the prompt and
+`<C-j>` returns to the prompt from the output window. Configure
+`ui.keymaps.focus_output` and `ui.keymaps.focus_prompt` to change or disable
+those mappings.
 
 Inside `:CodexCLI` / `:CodexResume`:
 
 | Key | Action |
 | --- | --- |
-| `jk` / `<C-\><C-n>` | Leave terminal input mode so you can scroll or run Vim commands |
+| `<C-\><C-n>` | Leave terminal input mode so you can scroll or run Vim commands |
 | `i` | Return to terminal input mode |
 | `<C-u>` / `<C-d>` | Scroll earlier/later output after leaving terminal input mode |
 | `G` | Jump back to the latest terminal output |
-| `q` | Close the Codex terminal split after leaving terminal input mode |
-| `<C-q>` | Close the Codex terminal split directly from terminal input mode |
+| `q` | Hide the Codex floating terminal after leaving terminal input mode |
 
 If Codex uses the alternate screen and older output disappears, set
 `cli.no_alt_screen = true`.
+
+Codex CLI keeps its native terminal-mode shortcuts. The plugin does not bind
+terminal-mode keys by default; set `cli.keymaps.terminal_escape` or
+`cli.keymaps.terminal_close` if you want aliases such as `jk` or `<C-q>`.
 
 ## 🧬 Diff Review
 
@@ -137,6 +150,13 @@ require("codex").setup({
     layout = "right",
     width = 0.38,
     border = "rounded",
+    keymaps = {
+      focus_output = "<C-k>",
+      focus_prompt = "<C-j>",
+    },
+  },
+  keymaps = {
+    visual_context = "<leader>aq",
   },
   edit = {
     mode = "manual", -- "manual" | "auto"
@@ -149,6 +169,17 @@ require("codex").setup({
   cli = {
     terminal = "native",
     no_alt_screen = false,
+    window = {
+      layout = "center", -- "center" | "right"
+      width = 0.9,
+      height = 0.85,
+      border = "rounded",
+    },
+    keymaps = {
+      normal_close = "q",
+      terminal_close = false,
+      terminal_escape = false,
+    },
   },
 })
 ```
@@ -157,8 +188,9 @@ require("codex").setup({
 
 ```lua
 vim.keymap.set("n", "<leader>aa", "<cmd>Codex<CR>", { desc = "Codex chat" })
-vim.keymap.set({ "n", "v" }, "<leader>aq", "<cmd>CodexAsk<CR>", { desc = "Ask Codex" })
-vim.keymap.set({ "n", "v" }, "<leader>ae", "<cmd>CodexEdit<CR>", { desc = "Edit with Codex" })
+vim.keymap.set("v", "<leader>aq", function()
+  require("codex.ui").attach_selection()
+end, { desc = "Attach selection to Codex" })
 vim.keymap.set("n", "<leader>ad", "<cmd>CodexDiff<CR>", { desc = "Codex diff" })
 vim.keymap.set("n", "<leader>ac", "<cmd>CodexCLI<CR>", { desc = "Codex CLI" })
 ```

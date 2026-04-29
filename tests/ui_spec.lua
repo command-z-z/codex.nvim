@@ -9,6 +9,10 @@ describe("codex.ui progress events", function()
     it("filters lifecycle-only events", function()
         assert.is_nil(ui._event_summary({ type = "thread.started" }, "compact"))
         assert.is_nil(ui._event_summary({ type = "item.completed" }, "verbose"))
+        assert.is_nil(ui._event_summary({
+            type = "response.completed",
+            message = "Final answer",
+        }, "compact"))
     end)
 
     it("formats compact public progress text", function()
@@ -39,5 +43,66 @@ describe("codex.ui progress events", function()
                 command = "rg TODO",
             },
         }, "compact"))
+    end)
+
+    it("filters assistant text events that are rendered as final messages", function()
+        assert.is_nil(ui._event_summary({
+            type = "agent_message",
+            message = "Final answer",
+        }, "compact"))
+        assert.is_nil(ui._event_summary({
+            type = "response.output_text.delta",
+            delta = "Final answer",
+        }, "compact"))
+        assert.is_nil(ui._event_summary({
+            type = "response_item",
+            item = {
+                type = "message",
+                role = "assistant",
+                text = "Final answer",
+            },
+        }, "compact"))
+    end)
+end)
+
+describe("codex.ui context summary", function()
+    it("summarizes selected context with file and lines only", function()
+        local long_line = string.rep("x", 320)
+        local summary = ui._context_summary({
+            path = "/tmp/example.lua",
+            start_line = 10,
+            end_line = 14,
+            text = table.concat({
+                "local one = 1",
+                "local two = 2",
+                long_line,
+                "local four = 4",
+                "local five = 5",
+            }, "\n"),
+        })
+
+        assert.is_not_nil(summary:find("example.lua", 1, true))
+        assert.is_not_nil(summary:find("Lines: 10-14 (5 lines)", 1, true))
+        assert.is_not_nil(summary:find("Select Block", 1, true))
+        assert.is_nil(summary:find(long_line, 1, true))
+        assert.is_nil(summary:find("Preview:", 1, true))
+        assert.is_nil(summary:find("## Context", 1, true))
+    end)
+end)
+
+describe("codex.ui display lines", function()
+    it("splits multiline strings before rendering", function()
+        assert.are.same({ "one", "two", "three" }, ui._split_display_lines("one\ntwo\nthree"))
+    end)
+
+    it("can remove a streamed final message before rendering the final block", function()
+        assert.is_false(ui._remove_trailing_block("missing"))
+    end)
+
+    it("deduplicates repeated event lines", function()
+        assert.has_no.errors(function()
+            ui._append_event("🛠 repeated command")
+            ui._append_event("🛠 repeated command")
+        end)
     end)
 end)

@@ -1,6 +1,7 @@
 local config = require("codex.config")
 
 local M = {}
+local visual_context_keymap = nil
 
 local function split_args(args)
     if not args or args == "" then
@@ -23,32 +24,6 @@ function M.setup(opts)
     vim.api.nvim_create_user_command("CodexClose", function()
         require("codex.ui").close()
     end, {})
-
-    vim.api.nvim_create_user_command("CodexAsk", function(command)
-        local prompt = command.args
-        if prompt == "" then
-            vim.ui.input({ prompt = "Ask Codex: " }, function(value)
-                if value and value ~= "" then
-                    require("codex.ui").ask(value)
-                end
-            end)
-            return
-        end
-        require("codex.ui").ask(prompt)
-    end, { nargs = "*", range = true })
-
-    vim.api.nvim_create_user_command("CodexEdit", function(command)
-        local prompt = command.args
-        if prompt == "" then
-            vim.ui.input({ prompt = "Edit with Codex: " }, function(value)
-                if value and value ~= "" then
-                    require("codex.ui").edit(value)
-                end
-            end)
-            return
-        end
-        require("codex.ui").edit(prompt)
-    end, { nargs = "*", range = true })
 
     vim.api.nvim_create_user_command("CodexDiff", function()
         require("codex.ui").diff()
@@ -79,6 +54,19 @@ function M.setup(opts)
     vim.api.nvim_create_user_command("CodexResume", function(command)
         require("codex.cli").resume(split_args(command.args))
     end, { nargs = "*" })
+
+    if visual_context_keymap then
+        pcall(vim.keymap.del, "v", visual_context_keymap)
+        visual_context_keymap = nil
+    end
+
+    local keymaps = config.options.keymaps or {}
+    if keymaps.visual_context then
+        visual_context_keymap = keymaps.visual_context
+        vim.keymap.set("v", visual_context_keymap, function()
+            require("codex.ui").attach_selection()
+        end, { silent = true, desc = "Attach selection to Codex chat" })
+    end
 end
 
 return M

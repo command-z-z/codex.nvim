@@ -10,6 +10,13 @@ M.defaults = {
         progress = {
             mode = "compact",
         },
+        keymaps = {
+            focus_output = "<C-k>",
+            focus_prompt = "<C-j>",
+        },
+    },
+    keymaps = {
+        visual_context = "<leader>aq",
     },
     edit = {
         mode = "manual",
@@ -22,6 +29,17 @@ M.defaults = {
     cli = {
         terminal = "native",
         no_alt_screen = false,
+        window = {
+            layout = "center",
+            width = 0.9,
+            height = 0.85,
+            border = "rounded",
+        },
+        keymaps = {
+            normal_close = "q",
+            terminal_close = false,
+            terminal_escape = false,
+        },
     },
 }
 

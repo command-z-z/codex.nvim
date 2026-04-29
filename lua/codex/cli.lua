@@ -29,18 +29,75 @@ local function terminal_running()
     return vim.fn.jobwait({ job_id }, 0)[1] == -1
 end
 
+local function resolve_size(value, total, min_value)
+    if type(value) ~= "number" then
+        return min_value
+    end
+    if value > 0 and value < 1 then
+        return math.floor(total * value)
+    end
+    return math.floor(value)
+end
+
+local function float_config()
+    local window = config.options.cli.window or {}
+    local layout = window.layout == "right" and "right" or "center"
+    local width = resolve_size(window.width or 0.9, vim.o.columns, 40)
+    local height = resolve_size(window.height or 0.85, vim.o.lines, 10)
+
+    local max_width = math.max(1, vim.o.columns - 4)
+    local max_height = math.max(1, vim.o.lines - 4)
+    width = math.min(math.max(20, width), max_width)
+    height = math.min(math.max(6, height), max_height)
+
+    local row = math.floor((vim.o.lines - height) / 2)
+    local col = math.floor((vim.o.columns - width) / 2)
+    if layout == "right" then
+        row = 1
+        col = vim.o.columns - width - 2
+    end
+
+    return {
+        relative = "editor",
+        row = math.max(0, row),
+        col = math.max(0, col),
+        width = width,
+        height = height,
+        style = "minimal",
+        border = window.border or config.options.ui.border or "rounded",
+        title = window.title or " Codex CLI ",
+        title_pos = "center",
+    }
+end
+
+local function open_terminal_window(bufnr)
+    local winid = vim.api.nvim_open_win(bufnr, true, float_config())
+    state.winid = winid
+    vim.wo[winid].number = false
+    vim.wo[winid].relativenumber = false
+    vim.wo[winid].signcolumn = "no"
+    return winid
+end
+
 local function setup_terminal_keymaps(bufnr)
     local opts = { buffer = bufnr, silent = true }
+    local keymaps = config.options.cli.keymaps or {}
 
-    vim.keymap.set("t", "jk", [[<C-\><C-n>]], vim.tbl_extend("force", opts, {
-        desc = "Leave Codex terminal input mode",
-    }))
-    vim.keymap.set("t", "<C-q>", [[<C-\><C-n><Cmd>lua require("codex.cli").toggle_tui()<CR>]], vim.tbl_extend("force", opts, {
-        desc = "Close Codex terminal window",
-    }))
-    vim.keymap.set("n", "q", M.toggle_tui, vim.tbl_extend("force", opts, {
-        desc = "Close Codex terminal window",
-    }))
+    if keymaps.terminal_escape then
+        vim.keymap.set("t", keymaps.terminal_escape, [[<C-\><C-n>]], vim.tbl_extend("force", opts, {
+            desc = "Leave Codex terminal input mode",
+        }))
+    end
+    if keymaps.terminal_close then
+        vim.keymap.set("t", keymaps.terminal_close, [[<C-\><C-n><Cmd>lua require("codex.cli").toggle_tui()<CR>]], vim.tbl_extend("force", opts, {
+            desc = "Hide Codex terminal window",
+        }))
+    end
+    if keymaps.normal_close then
+        vim.keymap.set("n", keymaps.normal_close, M.toggle_tui, vim.tbl_extend("force", opts, {
+            desc = "Hide Codex terminal window",
+        }))
+    end
 end
 
 local function cleanup_terminal(bufnr)
@@ -66,6 +123,7 @@ end
 
 local function setup_terminal_cleanup(bufnr)
     vim.bo[bufnr].buflisted = false
+    vim.bo[bufnr].bufhidden = "hide"
 
     vim.api.nvim_create_autocmd("TermClose", {
         buffer = bufnr,
@@ -76,6 +134,20 @@ local function setup_terminal_cleanup(bufnr)
             end)
         end,
     })
+end
+
+local function build_tui_args(args, cwd)
+    local command_args = { executable(), "-C", cwd }
+
+    if config.options.cli.no_alt_screen then
+        command_args[#command_args + 1] = "--no-alt-screen"
+    end
+
+    for _, arg in ipairs(args or {}) do
+        command_args[#command_args + 1] = arg
+    end
+
+    return command_args
 end
 
 function M.check()
@@ -169,10 +241,7 @@ function M.open_tui(args)
     end
 
     if state.bufnr and vim.api.nvim_buf_is_valid(state.bufnr) and terminal_running() then
-        vim.cmd("botright split")
-        vim.cmd("resize " .. math.floor(vim.o.lines * 0.35))
-        vim.api.nvim_win_set_buf(0, state.bufnr)
-        state.winid = vim.api.nvim_get_current_win()
+        open_terminal_window(state.bufnr)
         setup_terminal_keymaps(state.bufnr)
         vim.cmd("startinsert")
         return
@@ -182,23 +251,10 @@ function M.open_tui(args)
 
     args = args or {}
     local cwd = context.cwd()
-    local cmd = executable()
-    local command_parts = { vim.fn.shellescape(cmd), "-C", vim.fn.shellescape(cwd) }
-
-    if config.options.cli.no_alt_screen then
-        command_parts[#command_parts + 1] = "--no-alt-screen"
-    end
-
-    for _, arg in ipairs(args) do
-        command_parts[#command_parts + 1] = vim.fn.shellescape(arg)
-    end
-
-    vim.cmd("botright split")
-    vim.cmd("resize " .. math.floor(vim.o.lines * 0.35))
-    vim.cmd("terminal " .. table.concat(command_parts, " "))
-    local bufnr = vim.api.nvim_get_current_buf()
+    local bufnr = vim.api.nvim_create_buf(false, false)
     state.bufnr = bufnr
-    state.winid = vim.api.nvim_get_current_win()
+    open_terminal_window(bufnr)
+    vim.fn.termopen(build_tui_args(args, cwd), { cwd = cwd })
     setup_terminal_cleanup(bufnr)
     setup_terminal_keymaps(bufnr)
     vim.cmd("startinsert")
@@ -216,11 +272,20 @@ end
 
 function M.resume(args)
     args = args or {}
-    if #args == 0 then
-        args = { "--all" }
-    end
     args = vim.list_extend({ "resume" }, args)
     M.open_tui(args)
+end
+
+function M._build_tui_args(args, cwd)
+    return build_tui_args(args, cwd)
+end
+
+function M._setup_terminal_keymaps(bufnr)
+    setup_terminal_keymaps(bufnr)
+end
+
+function M._float_config()
+    return float_config()
 end
 
 return M

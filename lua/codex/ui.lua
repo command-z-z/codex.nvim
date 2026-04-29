@@ -13,6 +13,8 @@ local state = {
     diff_line_map = {},
     diff_popup = nil,
     progress_mode = nil,
+    pending_context = nil,
+    event_lines = {},
 }
 
 local ns = vim.api.nvim_create_namespace("codex.nvim")
@@ -29,6 +31,10 @@ local function setup_highlights()
     vim.api.nvim_set_hl(0, "CodexStatus", { link = "WarningMsg", default = true })
     vim.api.nvim_set_hl(0, "CodexProgress", { link = "Comment", default = true })
     vim.api.nvim_set_hl(0, "CodexTool", { link = "Function", default = true })
+    vim.api.nvim_set_hl(0, "CodexContextBlock", { bg = "#30384d", default = true })
+    vim.api.nvim_set_hl(0, "CodexContextBorder", { fg = "#89b4fa", bg = "#30384d", default = true })
+    vim.api.nvim_set_hl(0, "CodexContextLabel", { fg = "#f9e2af", bg = "#30384d", bold = true, default = true })
+    vim.api.nvim_set_hl(0, "CodexContextValue", { fg = "#cdd6f4", bg = "#30384d", default = true })
     vim.api.nvim_set_hl(0, "CodexDiffAdd", { link = "DiffAdd", default = true })
     vim.api.nvim_set_hl(0, "CodexDiffDelete", { link = "DiffDelete", default = true })
     vim.api.nvim_set_hl(0, "CodexDiffHeader", { link = "DiffText", default = true })
@@ -49,6 +55,21 @@ local function apply_highlights(bufnr)
             vim.api.nvim_buf_add_highlight(bufnr, ns, "CodexUser", row, 0, -1)
         elseif line:find("^## 🤖") then
             vim.api.nvim_buf_add_highlight(bufnr, ns, "CodexAssistant", row, 0, -1)
+        elseif line:find("^╭") or line:find("^╰") then
+            vim.api.nvim_buf_set_extmark(bufnr, ns, row, 0, {
+                line_hl_group = "CodexContextBlock",
+            })
+            vim.api.nvim_buf_add_highlight(bufnr, ns, "CodexContextBorder", row, 0, -1)
+        elseif line:find("^│") then
+            vim.api.nvim_buf_set_extmark(bufnr, ns, row, 0, {
+                line_hl_group = "CodexContextBlock",
+            })
+            vim.api.nvim_buf_add_highlight(bufnr, ns, "CodexContextBorder", row, 0, -1)
+            local label_start, label_end = line:find("%w+:")
+            if label_start and label_end then
+                vim.api.nvim_buf_add_highlight(bufnr, ns, "CodexContextLabel", row, label_start - 1, label_end)
+                vim.api.nvim_buf_add_highlight(bufnr, ns, "CodexContextValue", row, label_end + 1, -2)
+            end
         elseif line:find("^## ⚠") then
             vim.api.nvim_buf_add_highlight(bufnr, ns, "CodexError", row, 0, -1)
         elseif line:find("^Codex is running") or line:find("^⏳") or line:find("^🔎") then
@@ -94,6 +115,18 @@ local function prepare_panel_buffer(bufnr, filetype)
     vim.diagnostic.enable(false, { bufnr = bufnr })
 end
 
+local function prepare_input_buffer(bufnr)
+    if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+        return
+    end
+
+    vim.bo[bufnr].filetype = "codex-prompt"
+    vim.bo[bufnr].bufhidden = "wipe"
+    vim.bo[bufnr].swapfile = false
+    vim.bo[bufnr].modeline = false
+    vim.diagnostic.enable(false, { bufnr = bufnr })
+end
+
 local function prepare_panel_window(winid)
     if not winid or not vim.api.nvim_win_is_valid(winid) then
         return
@@ -102,15 +135,33 @@ local function prepare_panel_window(winid)
     vim.wo[winid].spell = false
 end
 
+local function split_display_lines(value)
+    local text = tostring(value or "")
+    return vim.split(text, "\n", { plain = true })
+end
+
 local function append(line)
-    state.lines[#state.lines + 1] = line
+    for _, display_line in ipairs(split_display_lines(line)) do
+        state.lines[#state.lines + 1] = display_line
+    end
+
     if state.popup and state.popup.bufnr and vim.api.nvim_buf_is_valid(state.popup.bufnr) then
         vim.bo[state.popup.bufnr].modifiable = true
         vim.api.nvim_buf_set_lines(state.popup.bufnr, 0, -1, false, state.lines)
         apply_highlights(state.popup.bufnr)
         vim.bo[state.popup.bufnr].modifiable = false
-        vim.api.nvim_win_set_cursor(state.popup.winid, { #state.lines, 0 })
+        if state.popup.winid and vim.api.nvim_win_is_valid(state.popup.winid) then
+            vim.api.nvim_win_set_cursor(state.popup.winid, { #state.lines, 0 })
+        end
     end
+end
+
+local function append_event(line)
+    if state.event_lines[line] then
+        return
+    end
+    state.event_lines[line] = true
+    append(line)
 end
 
 local function append_block(title, text)
@@ -119,6 +170,73 @@ local function append_block(title, text)
     for _, line in ipairs(vim.split(text or "", "\n", { plain = true })) do
         append(line)
     end
+end
+
+local function remove_trailing_block(text)
+    local lines = split_display_lines(text)
+    while #lines > 0 and lines[#lines] == "" do
+        lines[#lines] = nil
+    end
+    if #lines == 0 or #state.lines < #lines then
+        return false
+    end
+
+    local state_index = #state.lines
+    while state_index > 0 and state.lines[state_index] == "" do
+        state_index = state_index - 1
+    end
+    if state_index < #lines then
+        return false
+    end
+
+    for index = #lines, 1, -1 do
+        if state.lines[state_index] ~= lines[index] then
+            return false
+        end
+        state_index = state_index - 1
+    end
+
+    for _ = state_index + 1, #state.lines do
+        state.lines[#state.lines] = nil
+    end
+    return true
+end
+
+local function relative_path(path)
+    if not path or path == "" then
+        return "[No Name]"
+    end
+    local cwd = context.cwd()
+    if vim.startswith(path, cwd .. "/") then
+        return path:sub(#cwd + 2)
+    end
+    return path
+end
+
+local function context_summary(ctx)
+    if not ctx then
+        return ""
+    end
+
+    local lines = vim.split(ctx.text or "", "\n", { plain = true })
+    local body = {
+        string.format("File: %s", relative_path(ctx.path)),
+        string.format("Lines: %d-%d (%d lines)", ctx.start_line, ctx.end_line, #lines),
+    }
+    local width = #" Select Block "
+    for _, line in ipairs(body) do
+        width = math.max(width, #line)
+    end
+
+    local block = {
+        "╭─ Select Block " .. string.rep("─", width - #" Select Block ") .. "╮",
+    }
+    for _, line in ipairs(body) do
+        block[#block + 1] = "│ " .. line .. string.rep(" ", width - #line) .. " │"
+    end
+    block[#block + 1] = "╰" .. string.rep("─", width + 2) .. "╯"
+
+    return table.concat(block, "\n")
 end
 
 local function progress_mode()
@@ -181,6 +299,33 @@ local function icon_for_kind(kind)
     return "⏳"
 end
 
+local function is_assistant_text_event(event)
+    local event_type = tostring(event.type or "")
+    local item = type(event.item) == "table" and event.item or {}
+    local item_type = tostring(item.type or "")
+    local role = tostring(event.role or item.role or "")
+    local combined = event_type .. " " .. item_type
+
+    return event_type == "agent_message"
+        or event_type == "assistant_message"
+        or combined:find("output_text", 1, true) ~= nil
+        or (combined:find("message", 1, true) ~= nil and role == "assistant")
+end
+
+local function should_render_event(event, kind)
+    if is_assistant_text_event(event) then
+        return false
+    end
+    if kind == "error" or kind == "tool" or kind == "analysis" then
+        return true
+    end
+
+    local event_type = tostring(event.type or "")
+    return event_type:find("progress", 1, true) ~= nil
+        or event_type:find("status", 1, true) ~= nil
+        or event_type:find("reconnect", 1, true) ~= nil
+end
+
 local function event_summary(event, mode)
     if type(event) ~= "table" then
         return nil
@@ -193,6 +338,10 @@ local function event_summary(event, mode)
     end
 
     local kind = event_kind(event)
+    if not should_render_event(event, kind) then
+        return nil
+    end
+
     local icon = icon_for_kind(kind)
     if mode == "verbose" and event.type then
         return string.format("%s %s: %s", icon, tostring(event.type), text)
@@ -208,18 +357,50 @@ function M._progress_mode()
     return progress_mode()
 end
 
+function M._context_summary(ctx)
+    return context_summary(ctx)
+end
+
+function M._split_display_lines(value)
+    return split_display_lines(value)
+end
+
+function M._remove_trailing_block(text)
+    return remove_trailing_block(text)
+end
+
+function M._append_event(line)
+    append_event(line)
+end
+
 function M.toggle_progress_mode()
     state.progress_mode = progress_mode() == "verbose" and "compact" or "verbose"
     append("• Progress mode: " .. state.progress_mode)
     return state.progress_mode
 end
 
-function M.open()
-    if state.popup and state.popup.winid and vim.api.nvim_win_is_valid(state.popup.winid) then
-        vim.api.nvim_set_current_win(state.popup.winid)
-        return
-    end
+local function popup_valid()
+    return state.popup and state.popup.winid and vim.api.nvim_win_is_valid(state.popup.winid)
+end
 
+local function input_valid()
+    return state.input and state.input.winid and vim.api.nvim_win_is_valid(state.input.winid)
+end
+
+function M.focus_output()
+    if popup_valid() then
+        vim.api.nvim_set_current_win(state.popup.winid)
+    end
+end
+
+function M.focus_prompt()
+    if input_valid() then
+        vim.api.nvim_set_current_win(state.input.winid)
+        vim.cmd("startinsert")
+    end
+end
+
+function M.open()
     local Popup, Input, event = require_nui()
     if not Popup then
         return
@@ -233,84 +414,103 @@ function M.open()
     local row = math.max(1, math.floor((vim.o.lines - total_height) / 2))
     local col = math.max(1, math.floor((vim.o.columns - width) / 2))
 
-    state.popup = Popup({
-        enter = false,
-        focusable = true,
-        relative = "editor",
-        position = "50%",
-        size = {
-            width = width,
-            height = popup_height,
-        },
-        border = {
-            style = config.options.ui.border,
-            text = {
-                top = " codex.nvim ",
-                top_align = "center",
+    local created_popup = false
+    if not popup_valid() then
+        state.popup = Popup({
+            enter = false,
+            focusable = true,
+            relative = "editor",
+            position = "50%",
+            size = {
+                width = width,
+                height = popup_height,
             },
-        },
-        buf_options = {
-            buftype = "nofile",
-            filetype = "codex-chat",
-            modifiable = false,
-        },
-    })
-
-    state.input = Input({
-        relative = "editor",
-        position = {
-            row = row + popup_height + 2,
-            col = col,
-        },
-        size = {
-            width = width,
-            height = 1,
-        },
-        border = {
-            style = config.options.ui.border,
-            text = { top = " prompt " },
-        },
-        win_options = {
-            winhighlight = "Normal:Normal,FloatBorder:FloatBorder",
-        },
-    }, {
-        prompt = "> ",
-        on_submit = function(value)
-            if value and value ~= "" then
-                M.ask(value)
-            end
-        end,
-    })
-
-    state.popup:mount()
-    state.input:mount()
-    prepare_panel_buffer(state.popup.bufnr, "codex-chat")
-    prepare_panel_window(state.popup.winid)
-    if state.input and state.input.bufnr then
-        prepare_panel_buffer(state.input.bufnr, "codex-prompt")
-        prepare_panel_window(state.input.winid)
-    end
-    state.popup:on(event.BufLeave, function() end, { once = false })
-
-    if #state.lines == 0 then
-        append("# 🤖 Codex")
-        append("Ready. In input: Ctrl-v toggles progress detail, Ctrl-q closes. In chat: v toggles, q closes.")
+            border = {
+                style = config.options.ui.border,
+                text = {
+                    top = " codex.nvim ",
+                    top_align = "center",
+                },
+            },
+            buf_options = {
+                buftype = "nofile",
+                filetype = "codex-chat",
+                modifiable = false,
+            },
+        })
+        state.popup:mount()
+        prepare_panel_buffer(state.popup.bufnr, "codex-chat")
+        prepare_panel_window(state.popup.winid)
+        state.popup:on(event.BufLeave, function() end, { once = false })
+        created_popup = true
     else
-        append("")
+        vim.api.nvim_set_current_win(state.popup.winid)
     end
 
     local function map_close(bufnr, mode, lhs)
         vim.keymap.set(mode, lhs, M.close, { buffer = bufnr, silent = true, desc = "Close Codex" })
     end
 
-    map_close(state.popup.bufnr, "n", "q")
-    map_close(state.popup.bufnr, "n", "<Esc>")
-    vim.keymap.set("n", "v", M.toggle_progress_mode, { buffer = state.popup.bufnr, silent = true, desc = "Toggle Codex progress detail" })
-    if state.input and state.input.bufnr then
+    if created_popup then
+        if #state.lines == 0 then
+            append("# 🤖 Codex")
+            append("Ready. Type your prompt below. Ctrl-v toggles progress detail, Ctrl-q closes.")
+        else
+            append("")
+        end
+
+        map_close(state.popup.bufnr, "n", "q")
+        map_close(state.popup.bufnr, "n", "<Esc>")
+        local ui_keymaps = config.options.ui.keymaps or {}
+        if ui_keymaps.focus_prompt then
+            vim.keymap.set("n", ui_keymaps.focus_prompt, M.focus_prompt, { buffer = state.popup.bufnr, silent = true, desc = "Focus Codex prompt" })
+        end
+        vim.keymap.set("n", "v", M.toggle_progress_mode, { buffer = state.popup.bufnr, silent = true, desc = "Toggle Codex progress detail" })
+    end
+
+    if not input_valid() then
+        state.input = Input({
+            relative = "editor",
+            position = {
+                row = row + popup_height + 2,
+                col = col,
+            },
+            size = {
+                width = width,
+                height = 1,
+            },
+            border = {
+                style = config.options.ui.border,
+                text = { top = " prompt " },
+            },
+            win_options = {
+                winhighlight = "Normal:Normal,FloatBorder:FloatBorder",
+            },
+        }, {
+            prompt = "> ",
+            on_submit = function(value)
+                state.input = nil
+                if value and value ~= "" then
+                    local pending_context = state.pending_context
+                    state.pending_context = nil
+                    M.ask(value, { context = pending_context })
+                else
+                    M.open()
+                end
+            end,
+        })
+
+        state.input:mount()
+        prepare_input_buffer(state.input.bufnr)
+        prepare_panel_window(state.input.winid)
         vim.keymap.set("i", "<Esc>", "<Esc>", { buffer = state.input.bufnr, silent = true, desc = "Exit input mode" })
         map_close(state.input.bufnr, "n", "q")
         map_close(state.input.bufnr, "n", "<Esc>")
+        local ui_keymaps = config.options.ui.keymaps or {}
         vim.keymap.set({ "n", "i" }, "<C-q>", M.close, { buffer = state.input.bufnr, silent = true, desc = "Close Codex" })
+        if ui_keymaps.focus_output then
+            vim.keymap.set({ "n", "i" }, ui_keymaps.focus_output, M.focus_output, { buffer = state.input.bufnr, silent = true, desc = "Focus Codex output" })
+        end
         vim.keymap.set({ "n", "i" }, "<C-v>", M.toggle_progress_mode, { buffer = state.input.bufnr, silent = true, desc = "Toggle Codex progress detail" })
         vim.keymap.set("n", "v", M.toggle_progress_mode, { buffer = state.input.bufnr, silent = true, desc = "Toggle Codex progress detail" })
     end
@@ -336,10 +536,29 @@ function M.toggle()
     M.open()
 end
 
+function M.attach_selection()
+    local selected = context.selection()
+    if not selected or selected.text == "" then
+        vim.notify("Select code before attaching Codex context", vim.log.levels.WARN, { title = "codex.nvim" })
+        return
+    end
+
+    state.pending_context = selected
+    M.open()
+    append("")
+    append(context_summary(selected))
+
+    if state.input and state.input.winid and vim.api.nvim_win_is_valid(state.input.winid) then
+        vim.api.nvim_set_current_win(state.input.winid)
+        vim.cmd("startinsert")
+    end
+end
+
 local function run_prompt(prompt, opts)
     opts = opts or {}
     M.open()
     state.cwd = opts.cwd or context.cwd()
+    state.event_lines = {}
     append_block("🧑 You", opts.display_prompt or prompt)
     append("")
     append("Codex is running...")
@@ -351,7 +570,7 @@ local function run_prompt(prompt, opts)
         on_event = function(event)
             local line = event_summary(event, progress_mode())
             if line and line ~= "" then
-                append(line)
+                append_event(line)
             end
         end,
         on_exit = function(code, _, stderr, final_message)
@@ -359,6 +578,7 @@ local function run_prompt(prompt, opts)
                 append_block("⚠ Error", table.concat(stderr or {}, "\n"))
                 return
             end
+            remove_trailing_block(final_message or "")
             append_block("🤖 Codex", final_message or "")
             if opts.on_final then
                 opts.on_final(final_message or "")
@@ -367,8 +587,13 @@ local function run_prompt(prompt, opts)
     })
 end
 
-function M.ask(prompt)
-    local full_prompt = context.build_prompt(prompt, { include_buffer = false, include_git_diff = false })
+function M.ask(prompt, opts)
+    opts = opts or {}
+    local full_prompt = context.build_prompt(prompt, {
+        include_buffer = false,
+        include_git_diff = false,
+        context = opts.context,
+    })
     run_prompt(full_prompt, {
         display_prompt = prompt,
         sandbox = "read-only",
