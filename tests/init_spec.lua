@@ -23,4 +23,18 @@ describe("codex setup", function()
 
         assert.are.equal("", vim.fn.maparg("<leader>aq", "v"))
     end)
+
+    it("passes quoted CLI command args as single args", function()
+        local cli = require("codex.cli")
+        local original_open_tui = cli.open_tui
+        local captured
+        cli.open_tui = function(args)
+            captured = args
+        end
+
+        vim.cmd([[CodexCLI --profile "my profile"]])
+
+        cli.open_tui = original_open_tui
+        assert.are.same({ "--profile", "my profile" }, captured)
+    end)
 end)

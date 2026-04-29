@@ -2,6 +2,9 @@ local cli = require("codex.cli")
 local config = require("codex.config")
 local context = require("codex.context")
 local diff = require("codex.diff")
+local diff_view = require("codex.ui.diff_view")
+local events = require("codex.ui.events")
+local panel = require("codex.ui.panel")
 
 local M = {}
 
@@ -41,15 +44,17 @@ local function setup_highlights()
     highlights_ready = true
 end
 
-local function apply_highlights(bufnr)
+local function apply_highlights(bufnr, start_index)
     if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
         return
     end
 
     setup_highlights()
-    vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+    start_index = start_index or 1
+    vim.api.nvim_buf_clear_namespace(bufnr, ns, start_index - 1, -1)
 
-    for index, line in ipairs(state.lines) do
+    for index = start_index, #state.lines do
+        local line = state.lines[index]
         local row = index - 1
         if line:find("^## 🧑") then
             vim.api.nvim_buf_add_highlight(bufnr, ns, "CodexUser", row, 0, -1)
@@ -90,65 +95,40 @@ local function apply_highlights(bufnr)
     end
 end
 
-local function require_nui()
-    local ok_popup, Popup = pcall(require, "nui.popup")
-    local ok_input, Input = pcall(require, "nui.input")
-    local ok_autocmd, autocmd = pcall(require, "nui.utils.autocmd")
-    if not ok_popup or not ok_input or not ok_autocmd then
-        vim.notify("codex.nvim requires nui.nvim", vim.log.levels.ERROR, { title = "codex.nvim" })
-        return nil
-    end
-    local event = autocmd.event
-    return Popup, Input, event
-end
-
-local function prepare_panel_buffer(bufnr, filetype)
-    if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
-        return
-    end
-
-    vim.bo[bufnr].buftype = "nofile"
-    vim.bo[bufnr].filetype = filetype
-    vim.bo[bufnr].bufhidden = "wipe"
-    vim.bo[bufnr].swapfile = false
-    vim.bo[bufnr].modeline = false
-    vim.diagnostic.enable(false, { bufnr = bufnr })
-end
-
-local function prepare_input_buffer(bufnr)
-    if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
-        return
-    end
-
-    vim.bo[bufnr].filetype = "codex-prompt"
-    vim.bo[bufnr].bufhidden = "wipe"
-    vim.bo[bufnr].swapfile = false
-    vim.bo[bufnr].modeline = false
-    vim.diagnostic.enable(false, { bufnr = bufnr })
-end
-
-local function prepare_panel_window(winid)
-    if not winid or not vim.api.nvim_win_is_valid(winid) then
-        return
-    end
-
-    vim.wo[winid].spell = false
-end
-
 local function split_display_lines(value)
     local text = tostring(value or "")
     return vim.split(text, "\n", { plain = true })
 end
 
+local function refresh_output(start_index)
+    if not state.popup or not state.popup.bufnr or not vim.api.nvim_buf_is_valid(state.popup.bufnr) then
+        return
+    end
+
+    vim.bo[state.popup.bufnr].modifiable = true
+    vim.api.nvim_buf_set_lines(state.popup.bufnr, 0, -1, false, state.lines)
+    apply_highlights(state.popup.bufnr, start_index)
+    vim.bo[state.popup.bufnr].modifiable = false
+    if state.popup.winid and vim.api.nvim_win_is_valid(state.popup.winid) then
+        vim.api.nvim_win_set_cursor(state.popup.winid, { math.max(1, #state.lines), 0 })
+    end
+end
+
 local function append(line)
-    for _, display_line in ipairs(split_display_lines(line)) do
+    local old_count = #state.lines
+    local display_lines = split_display_lines(line)
+    for _, display_line in ipairs(display_lines) do
         state.lines[#state.lines + 1] = display_line
     end
 
     if state.popup and state.popup.bufnr and vim.api.nvim_buf_is_valid(state.popup.bufnr) then
         vim.bo[state.popup.bufnr].modifiable = true
-        vim.api.nvim_buf_set_lines(state.popup.bufnr, 0, -1, false, state.lines)
-        apply_highlights(state.popup.bufnr)
+        if old_count == 0 then
+            vim.api.nvim_buf_set_lines(state.popup.bufnr, 0, -1, false, state.lines)
+        else
+            vim.api.nvim_buf_set_lines(state.popup.bufnr, old_count, old_count, false, display_lines)
+        end
+        apply_highlights(state.popup.bufnr, old_count + 1)
         vim.bo[state.popup.bufnr].modifiable = false
         if state.popup.winid and vim.api.nvim_win_is_valid(state.popup.winid) then
             vim.api.nvim_win_set_cursor(state.popup.winid, { #state.lines, 0 })
@@ -157,10 +137,10 @@ local function append(line)
 end
 
 local function append_event(line)
-    if state.event_lines[line] then
+    if state.event_lines.last == line then
         return
     end
-    state.event_lines[line] = true
+    state.event_lines.last = line
     append(line)
 end
 
@@ -199,6 +179,7 @@ local function remove_trailing_block(text)
     for _ = state_index + 1, #state.lines do
         state.lines[#state.lines] = nil
     end
+    refresh_output(state_index + 1)
     return true
 end
 
@@ -244,109 +225,8 @@ local function progress_mode()
     return state.progress_mode or progress.mode or "compact"
 end
 
-local function first_text(...)
-    for index = 1, select("#", ...) do
-        local value = select(index, ...)
-        if type(value) == "string" and value ~= "" then
-            return value
-        end
-    end
-    return nil
-end
-
-local function nested_text(value)
-    if type(value) == "string" then
-        return value
-    end
-    if type(value) ~= "table" then
-        return nil
-    end
-    return first_text(value.message, value.text, value.title, value.name, value.command, value.status)
-end
-
-local function event_kind(event)
-    local event_type = tostring(event.type or "")
-    local item = type(event.item) == "table" and event.item or {}
-    local item_type = tostring(item.type or "")
-    local combined = event_type .. " " .. item_type
-    local text = first_text(event.message, event.text, event.delta, nested_text(event.error), nested_text(event.item))
-
-    if text and (text:find("Reconnecting", 1, true) or text:find("error", 1, true)) then
-        return "error"
-    end
-    if combined:find("error") or combined:find("failed") then
-        return "error"
-    end
-    if combined:find("tool") or combined:find("command") or combined:find("exec") or combined:find("function") then
-        return "tool"
-    end
-    if combined:find("analysis") or combined:find("reason") or combined:find("plan") then
-        return "analysis"
-    end
-    return "status"
-end
-
-local function icon_for_kind(kind)
-    if kind == "error" then
-        return "⚠"
-    end
-    if kind == "tool" then
-        return "🛠"
-    end
-    if kind == "analysis" then
-        return "🔎"
-    end
-    return "⏳"
-end
-
-local function is_assistant_text_event(event)
-    local event_type = tostring(event.type or "")
-    local item = type(event.item) == "table" and event.item or {}
-    local item_type = tostring(item.type or "")
-    local role = tostring(event.role or item.role or "")
-    local combined = event_type .. " " .. item_type
-
-    return event_type == "agent_message"
-        or event_type == "assistant_message"
-        or combined:find("output_text", 1, true) ~= nil
-        or (combined:find("message", 1, true) ~= nil and role == "assistant")
-end
-
-local function should_render_event(event, kind)
-    if is_assistant_text_event(event) then
-        return false
-    end
-    if kind == "error" or kind == "tool" or kind == "analysis" then
-        return true
-    end
-
-    local event_type = tostring(event.type or "")
-    return event_type:find("progress", 1, true) ~= nil
-        or event_type:find("status", 1, true) ~= nil
-        or event_type:find("reconnect", 1, true) ~= nil
-end
-
 local function event_summary(event, mode)
-    if type(event) ~= "table" then
-        return nil
-    end
-
-    mode = mode or progress_mode()
-    local text = first_text(event.message, event.text, event.delta, nested_text(event.error), nested_text(event.item))
-    if not text or text == "" then
-        return nil
-    end
-
-    local kind = event_kind(event)
-    if not should_render_event(event, kind) then
-        return nil
-    end
-
-    local icon = icon_for_kind(kind)
-    if mode == "verbose" and event.type then
-        return string.format("%s %s: %s", icon, tostring(event.type), text)
-    end
-    return string.format("%s %s", icon, text)
+    return events.summary(event, mode or progress_mode())
 end
 
 function M._event_summary(event, mode)
@@ -401,7 +281,7 @@ function M.focus_prompt()
 end
 
 function M.open()
-    local Popup, Input, event = require_nui()
+    local Popup, Input, event = panel.require_nui()
     if not Popup then
         return
     end
@@ -439,8 +319,8 @@ function M.open()
             },
         })
         state.popup:mount()
-        prepare_panel_buffer(state.popup.bufnr, "codex-chat")
-        prepare_panel_window(state.popup.winid)
+        panel.prepare_buffer(state.popup.bufnr, "codex-chat")
+        panel.prepare_window(state.popup.winid)
         state.popup:on(event.BufLeave, function() end, { once = false })
         created_popup = true
     else
@@ -501,8 +381,8 @@ function M.open()
         })
 
         state.input:mount()
-        prepare_input_buffer(state.input.bufnr)
-        prepare_panel_window(state.input.winid)
+        panel.prepare_input_buffer(state.input.bufnr)
+        panel.prepare_window(state.input.winid)
         vim.keymap.set("i", "<Esc>", "<Esc>", { buffer = state.input.bufnr, silent = true, desc = "Exit input mode" })
         map_close(state.input.bufnr, "n", "q")
         map_close(state.input.bufnr, "n", "<Esc>")
@@ -622,57 +502,6 @@ function M._open_diff_from_message(final_message, opts)
     return open_diff_from_message(final_message, opts)
 end
 
-local function diff_view_lines()
-    local lines = {
-        "# Codex Diff",
-        "",
-        "a mark accepted  r mark rejected  A accept file  R reject file  p preview  x apply to files  q close",
-        "",
-    }
-    local line_map = {}
-    local diff_state = diff.get_state()
-    for file_index, file in ipairs(diff_state.files) do
-        local name = file.header[1] or ("file " .. file_index)
-        lines[#lines + 1] = string.format("File %d: %s", file_index, name)
-        line_map[#lines] = { file = file_index }
-
-        for _, header in ipairs(file.header) do
-            lines[#lines + 1] = header
-            line_map[#lines] = { file = file_index }
-        end
-
-        for hunk_index, hunk in ipairs(file.hunks) do
-            local mark = hunk.accepted and "✓ accepted" or "✗ rejected"
-            lines[#lines + 1] = string.format("%s %d.%d %s", mark, file_index, hunk_index, hunk.header)
-            line_map[#lines] = { file = file_index, hunk = hunk_index }
-
-            for _, line in ipairs(hunk.lines) do
-                lines[#lines + 1] = line
-                line_map[#lines] = { file = file_index, hunk = hunk_index }
-            end
-            lines[#lines + 1] = ""
-        end
-        lines[#lines + 1] = ""
-    end
-    return lines, line_map
-end
-
-local function current_hunk_from_line(line)
-    local item = state.diff_line_map[line]
-    if item then
-        return item.file, item.hunk
-    end
-
-    for index = line - 1, 1, -1 do
-        item = state.diff_line_map[index]
-        if item then
-            return item.file, item.hunk
-        end
-    end
-
-    return nil, nil
-end
-
 local function highlight_diff_view(bufnr)
     setup_highlights()
     vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
@@ -704,7 +533,7 @@ function M.diff()
         return
     end
 
-    local Popup, _, event = require_nui()
+    local Popup, _, event = panel.require_nui()
     if not Popup then
         return
     end
@@ -732,7 +561,7 @@ function M.diff()
 
     local function refresh()
         local cursor = vim.api.nvim_win_is_valid(popup.winid) and vim.api.nvim_win_get_cursor(popup.winid) or { 1, 0 }
-        local lines, line_map = diff_view_lines()
+        local lines, line_map = diff_view.lines(diff.get_state())
         state.diff_line_map = line_map
         vim.bo[popup.bufnr].modifiable = true
         vim.api.nvim_buf_set_lines(popup.bufnr, 0, -1, false, lines)
@@ -746,8 +575,8 @@ function M.diff()
     end
 
     popup:mount()
-    prepare_panel_buffer(popup.bufnr, "codex-diff")
-    prepare_panel_window(popup.winid)
+    panel.prepare_buffer(popup.bufnr, "codex-diff")
+    panel.prepare_window(popup.winid)
     refresh()
 
     local function map(lhs, rhs)
@@ -755,7 +584,7 @@ function M.diff()
     end
 
     map("a", function()
-        local file_index, hunk_index = current_hunk_from_line(vim.fn.line("."))
+        local file_index, hunk_index = diff_view.item_from_line(state.diff_line_map, vim.fn.line("."))
         if file_index and hunk_index then
             diff.accept(file_index, hunk_index)
             refresh()
@@ -765,7 +594,7 @@ function M.diff()
         end
     end)
     map("r", function()
-        local file_index, hunk_index = current_hunk_from_line(vim.fn.line("."))
+        local file_index, hunk_index = diff_view.item_from_line(state.diff_line_map, vim.fn.line("."))
         if file_index and hunk_index then
             diff.reject(file_index, hunk_index)
             refresh()
@@ -775,14 +604,14 @@ function M.diff()
         end
     end)
     map("A", function()
-        local file_index = current_hunk_from_line(vim.fn.line("."))
+        local file_index = diff_view.item_from_line(state.diff_line_map, vim.fn.line("."))
         if file_index then
             diff.accept(file_index)
             refresh()
         end
     end)
     map("R", function()
-        local file_index = current_hunk_from_line(vim.fn.line("."))
+        local file_index = diff_view.item_from_line(state.diff_line_map, vim.fn.line("."))
         if file_index then
             diff.reject(file_index)
             refresh()

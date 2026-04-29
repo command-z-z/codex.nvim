@@ -157,3 +157,27 @@ describe("codex.ui diff handoff", function()
         assert.are.equal(1, #diff.get_state().files)
     end)
 end)
+
+describe("codex.ui diff view helpers", function()
+    it("labels metadata-only files and maps file lines", function()
+        local view = require("codex.ui.diff_view")
+        local lines, line_map = view.lines({
+            files = {
+                {
+                    header = {
+                        "diff --git a/old.lua b/new.lua",
+                        "rename from old.lua",
+                        "rename to new.lua",
+                    },
+                    hunks = {},
+                    accepted = true,
+                },
+            },
+        })
+
+        assert.is_not_nil(table.concat(lines, "\n"):find("metadata only", 1, true))
+        local file_index, hunk_index = view.item_from_line(line_map, 5)
+        assert.are.equal(1, file_index)
+        assert.is_nil(hunk_index)
+    end)
+end)

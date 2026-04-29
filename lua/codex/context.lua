@@ -86,7 +86,7 @@ end
 function M.build_prompt(user_prompt, opts)
     opts = opts or {}
     local parts = { user_prompt }
-    local selected = opts.context or M.selection()
+    local selected = opts.context or (opts.include_selection and M.selection() or nil)
     local ctx = selected or (opts.include_buffer and M.current_buffer() or nil)
 
     if ctx and ctx.text ~= "" then

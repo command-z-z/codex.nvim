@@ -1,5 +1,6 @@
 local cli = require("codex.cli")
 local config = require("codex.config")
+local args = require("codex.args")
 
 describe("codex.cli", function()
     before_each(function()
@@ -10,6 +11,10 @@ describe("codex.cli", function()
         local args = cli._build_tui_args({ "resume" }, "/tmp/project")
 
         assert.are.same({ "codex", "-C", "/tmp/project", "resume" }, args)
+    end)
+
+    it("splits quoted user command args", function()
+        assert.are.same({ "--profile", "my profile", "--model", "gpt-5" }, args.split('--profile "my profile" --model gpt-5'))
     end)
 
     it("does not add --all to resume by default", function()

@@ -1,14 +1,8 @@
 local config = require("codex.config")
+local args = require("codex.args")
 
 local M = {}
 local visual_context_keymap = nil
-
-local function split_args(args)
-    if not args or args == "" then
-        return {}
-    end
-    return vim.split(args, "%s+", { trimempty = true })
-end
 
 function M.setup(opts)
     config.setup(opts)
@@ -44,15 +38,15 @@ function M.setup(opts)
     end, {})
 
     vim.api.nvim_create_user_command("CodexCLI", function(command)
-        require("codex.cli").open_tui(split_args(command.args))
+        require("codex.cli").open_tui(args.split(command.args))
     end, { nargs = "*" })
 
     vim.api.nvim_create_user_command("CodexCLIToggle", function(command)
-        require("codex.cli").toggle_tui(split_args(command.args))
+        require("codex.cli").toggle_tui(args.split(command.args))
     end, { nargs = "*" })
 
     vim.api.nvim_create_user_command("CodexResume", function(command)
-        require("codex.cli").resume(split_args(command.args))
+        require("codex.cli").resume(args.split(command.args))
     end, { nargs = "*" })
 
     if visual_context_keymap then
