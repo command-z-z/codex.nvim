@@ -105,6 +105,16 @@ describe("codex.ui display lines", function()
             ui._append_event("🛠 repeated command")
         end)
     end)
+
+    it("can reopen the chat popup with existing history", function()
+        ui._append_event("🛠 existing history")
+
+        assert.has_no.errors(function()
+            ui.open()
+        end)
+
+        ui.close()
+    end)
 end)
 
 describe("codex.ui chat sandbox", function()

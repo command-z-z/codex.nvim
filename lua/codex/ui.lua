@@ -110,7 +110,8 @@ local function refresh_output(start_index)
     apply_highlights(state.popup.bufnr, start_index)
     vim.bo[state.popup.bufnr].modifiable = false
     if state.popup.winid and vim.api.nvim_win_is_valid(state.popup.winid) then
-        vim.api.nvim_win_set_cursor(state.popup.winid, { math.max(1, #state.lines), 0 })
+        local line_count = vim.api.nvim_buf_line_count(state.popup.bufnr)
+        vim.api.nvim_win_set_cursor(state.popup.winid, { math.min(math.max(1, #state.lines), line_count), 0 })
     end
 end
 
@@ -122,8 +123,9 @@ local function append(line)
     end
 
     if state.popup and state.popup.bufnr and vim.api.nvim_buf_is_valid(state.popup.bufnr) then
+        local line_count = vim.api.nvim_buf_line_count(state.popup.bufnr)
         vim.bo[state.popup.bufnr].modifiable = true
-        if old_count == 0 then
+        if old_count == 0 or line_count < old_count then
             vim.api.nvim_buf_set_lines(state.popup.bufnr, 0, -1, false, state.lines)
         else
             vim.api.nvim_buf_set_lines(state.popup.bufnr, old_count, old_count, false, display_lines)
@@ -131,7 +133,8 @@ local function append(line)
         apply_highlights(state.popup.bufnr, old_count + 1)
         vim.bo[state.popup.bufnr].modifiable = false
         if state.popup.winid and vim.api.nvim_win_is_valid(state.popup.winid) then
-            vim.api.nvim_win_set_cursor(state.popup.winid, { #state.lines, 0 })
+            line_count = vim.api.nvim_buf_line_count(state.popup.bufnr)
+            vim.api.nvim_win_set_cursor(state.popup.winid, { math.min(math.max(1, #state.lines), line_count), 0 })
         end
     end
 end
