@@ -665,10 +665,17 @@ local vim = {
     end
   end,
 
-  json = {
-    encode = function(data)
-      -- Extremely simplified JSON encoding, sufficient for basic test cases.
-      -- Does not handle all JSON types or edge cases.
+  json = (function()
+    -- Use dkjson for proper JSON encode/decode in tests.
+    local ok, dkjson = pcall(require, "dkjson")
+    if ok then
+      return {
+        encode = function(data) return dkjson.encode(data) end,
+        decode = function(json_str) local v, _, err = dkjson.decode(json_str); return v end,
+      }
+    end
+    -- Fallback: simplified encode + non-functional decode stub
+    local function encode(data)
       if type(data) == "table" then
         local parts = {}
         for k, v in pairs(data) do
@@ -676,18 +683,16 @@ local vim = {
           if type(v) == "string" then
             val = '"' .. v .. '"'
           elseif type(v) == "table" then
-            val = vim.json.encode(v)
+            val = encode(v)
           else
             val = tostring(v)
           end
-
           if type(k) == "number" then
             table.insert(parts, val)
           else
             table.insert(parts, '"' .. k .. '":' .. val)
           end
         end
-
         if #parts > 0 and type(next(data)) == "number" then
           return "[" .. table.concat(parts, ",") .. "]"
         else
@@ -698,15 +703,12 @@ local vim = {
       else
         return tostring(data)
       end
-    end,
-
-    decode = function(json_str)
-      -- This is a non-functional stub for `vim.json.decode`.
-      -- If tests require actual JSON decoding, a proper library or a more
-      -- sophisticated mock implementation would be necessary.
-      return {}
-    end,
-  },
+    end
+    return {
+      encode = encode,
+      decode = function(json_str) return {} end,
+    }
+  end)(),
 
   -- Additional missing vim functions
   wait = function(timeout, condition, interval, fast_only)
