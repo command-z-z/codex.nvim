@@ -73,12 +73,19 @@ describe("transport.session", function()
     })
     s:connect()
 
-    -- Feed a minimal 101 response (accept key doesn't need to be validated strictly here)
+    -- Compute the correct accept key from the generated ws_key
+    local handshake = require("codex.transport.handshake")
+    local expected_accept = handshake.parse_response("HTTP/1.1 101 Switching Protocols\r\nsec-websocket-accept: dummy\r\n\r\n")
+    -- Actually, we need to compute the accept key from s.ws_key
+    local utils = require("codex.transport.utils")
+    local correct_accept = utils.generate_accept_key(s.ws_key)
+
+    -- Feed a minimal 101 response with the correct accept key
     local response_101 = table.concat({
       "HTTP/1.1 101 Switching Protocols",
       "connection: upgrade",
       "upgrade: websocket",
-      "sec-websocket-accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=",
+      "sec-websocket-accept: " .. correct_accept,
       "", "",
     }, "\r\n")
     s:_on_data(response_101)
@@ -111,7 +118,9 @@ describe("transport.session", function()
       on_message = function(msg) received = msg end,
     })
     s:connect()
-    local r101 = "HTTP/1.1 101 Switching Protocols\r\nconnection: upgrade\r\nupgrade: websocket\r\nsec-websocket-accept: x\r\n\r\n"
+    local utils = require("codex.transport.utils")
+    local correct_accept = utils.generate_accept_key(s.ws_key)
+    local r101 = "HTTP/1.1 101 Switching Protocols\r\nconnection: upgrade\r\nupgrade: websocket\r\nsec-websocket-accept: " .. correct_accept .. "\r\n\r\n"
     s:_on_data(r101)
 
     -- Build a real unmasked server→client TEXT frame
@@ -120,5 +129,23 @@ describe("transport.session", function()
     s:_on_data(f)
 
     assert.are.equal("hello", received)
+  end)
+
+  it("close() sends a masked CLOSE frame", function()
+    local s = session_mod.new("ws://127.0.0.1:12345/", {})
+    s:connect()
+    local utils = require("codex.transport.utils")
+    local correct_accept = utils.generate_accept_key(s.ws_key)
+    local r101 = "HTTP/1.1 101 Switching Protocols\r\nconnection: upgrade\r\nupgrade: websocket\r\nsec-websocket-accept: " .. correct_accept .. "\r\n\r\n"
+    s:_on_data(r101)
+
+    local writes_before = #mock_tcp_calls.writes
+    s:close()
+    -- There should be one more write (the close frame)
+    assert.are.equal(writes_before + 1, #mock_tcp_calls.writes)
+    local close_frame_data = mock_tcp_calls.writes[#mock_tcp_calls.writes]
+    -- Byte 2 of WS frame: bit 7 = MASK bit. For a masked frame, byte 2 & 0x80 == 0x80
+    local byte2 = close_frame_data:byte(2)
+    assert.is_true(byte2 >= 128, "CLOSE frame must be masked (MASK bit set)")
   end)
 end)

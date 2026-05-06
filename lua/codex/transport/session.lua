@@ -86,7 +86,9 @@ function Session:close()
   if self.state ~= "open" then return end
   self.state = "closing"
   self:_stop_heartbeat()
-  self.conn:write(frame.create_close_frame())
+  -- masked client→server CLOSE frame (RFC 6455 §5.1)
+  local close_payload = string.char(0x03, 0xE8)  -- code 1000 big-endian
+  self.conn:write(frame.create_frame(frame.OPCODE.CLOSE, close_payload, true, true))
 end
 
 -- Internal: called with raw bytes from the TCP layer.
@@ -101,6 +103,12 @@ function Session:_on_data(data)
     local ok, accept = handshake.parse_response(response)
     if not ok then
       self:_on_error("WebSocket handshake failed: " .. tostring(accept))
+      return
+    end
+
+    -- Validate the accept key (RFC 6455 §4.1)
+    if accept and not handshake.validate_accept(self.ws_key, accept) then
+      self:_on_error("WebSocket handshake: invalid Sec-WebSocket-Accept from server")
       return
     end
 
