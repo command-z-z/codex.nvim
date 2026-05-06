@@ -1,5 +1,16 @@
 # ✨ codex.nvim
 
+> ⚠️ **Migration in progress (2026-05-06):** codex.nvim is being rewritten to mirror
+> [claudecode.nvim](https://github.com/coder/claudecode.nvim) so Claude/Codex switching feels seamless.
+> During Phase 0–2 (~3 days), most commands are temporarily unavailable. Pin to tag
+> `pre-rewrite` if you need the old plenary+nui-based plugin:
+>
+> ```lua
+> { "command-z-z/codex.nvim", tag = "pre-rewrite" }
+> ```
+>
+> Track progress: `docs/superpowers/plans/2026-05-06-codex-nvim-mirror-claudecode.md`.
+
 <p align="center">
   <img alt="Neovim" src="https://img.shields.io/badge/Neovim-0.10+-57A143?style=for-the-badge&logo=neovim&logoColor=white" />
   <img alt="Codex CLI" src="https://img.shields.io/badge/Codex-CLI-111827?style=for-the-badge&logo=openai&logoColor=white" />
