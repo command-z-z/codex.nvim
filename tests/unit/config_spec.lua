@@ -69,6 +69,11 @@ describe("codex.config", function()
       local cfg = config.apply(nil)
       assert.equals("codex", cfg.codex_cmd)
     end)
+    it("does not alias base-only nested tables (modifying returned cfg does not mutate defaults)", function()
+      local cfg = config.apply({})
+      cfg.diff_opts.layout = "horizontal"
+      assert.equals("vertical", config.defaults.diff_opts.layout)
+    end)
   end)
 
   describe("validate()", function()

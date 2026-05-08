@@ -36,9 +36,16 @@ M.defaults = {
   models = {},
 }
 
+local function deep_copy(t)
+  local c = {}
+  for k, v in pairs(t) do
+    c[k] = type(v) == "table" and deep_copy(v) or v
+  end
+  return c
+end
+
 local function deep_merge(base, override)
-  local result = {}
-  for k, v in pairs(base) do result[k] = v end
+  local result = deep_copy(base)
   for k, v in pairs(override) do
     if type(v) == "table" and type(result[k]) == "table" then
       result[k] = deep_merge(result[k], v)
@@ -57,6 +64,9 @@ local VALID_PROVIDERS = { auto = true, snacks = true, native = true, external = 
 local VALID_POLICIES  = { prompt = true, ["auto-deny"] = true, ["auto-allow"] = true }
 
 function M.validate(cfg)
+  if type(cfg) ~= "table" then
+    error("validate: cfg must be a table, got " .. type(cfg))
+  end
   if cfg.codex_cmd ~= nil and type(cfg.codex_cmd) ~= "string" then
     error("codex_cmd must be a string, got " .. type(cfg.codex_cmd))
   end
