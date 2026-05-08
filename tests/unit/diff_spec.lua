@@ -314,4 +314,249 @@ describe("codex.diff", function()
       assert.has_no.errors(function() diff.reject_hunk(1, 1) end)
     end)
   end)
+
+  -- ── UI functions ───────────────────────────────────────────────
+  describe("UI functions", function()
+    before_each(function()
+      -- nvim_win_set_cursor not in mock — add stub
+      _G.vim.api.nvim_win_set_cursor = function(win, pos)
+        if _G.vim._windows[win] then
+          _G.vim._windows[win].cursor = pos
+        end
+      end
+    end)
+
+    describe("open() creates UI", function()
+      it("creates a buffer", function()
+        diff.open("diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n", nil, {})
+        local p = diff.get_pending()
+        assert.is_not_nil(p.buf)
+        assert.is_true(vim.api.nvim_buf_is_valid(p.buf))
+      end)
+
+      it("creates a window", function()
+        diff.open("diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n", nil, {})
+        local p = diff.get_pending()
+        assert.is_not_nil(p.win)
+        assert.is_true(vim.api.nvim_win_is_valid(p.win))
+      end)
+
+      it("sets filetype=diff on buffer", function()
+        diff.open("diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n", nil, {})
+        local p = diff.get_pending()
+        assert.equals("diff", vim.api.nvim_buf_get_option(p.buf, "filetype"))
+      end)
+
+      it("sets buftype=nofile on buffer", function()
+        diff.open("diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n", nil, {})
+        local p = diff.get_pending()
+        assert.equals("nofile", vim.api.nvim_buf_get_option(p.buf, "buftype"))
+      end)
+    end)
+
+    describe("_refresh_buf()", function()
+      it("writes hunk header line to buffer", function()
+        diff.open("diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-old\n+new\n", nil, {})
+        local p = diff.get_pending()
+        local lines = vim.api.nvim_buf_get_lines(p.buf, 0, -1, false)
+        local found = false
+        for _, line in ipairs(lines) do
+          if line:find("@@ -1,1 +1,1 @@", 1, true) then found = true end
+        end
+        assert.is_true(found)
+      end)
+
+      it("marks accepted hunk with [ACCEPT]", function()
+        diff.open("diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n", nil, {})
+        local p = diff.get_pending()
+        local lines = vim.api.nvim_buf_get_lines(p.buf, 0, -1, false)
+        local found = false
+        for _, line in ipairs(lines) do
+          if line:find("[ACCEPT]", 1, true) then found = true end
+        end
+        assert.is_true(found)
+      end)
+
+      it("marks rejected hunk with [REJECT] after reject_hunk()", function()
+        diff.open("diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n", nil, {})
+        diff.reject_hunk(1, 1)
+        local p = diff.get_pending()
+        local lines = vim.api.nvim_buf_get_lines(p.buf, 0, -1, false)
+        local found = false
+        for _, line in ipairs(lines) do
+          if line:find("[REJECT]", 1, true) then found = true end
+        end
+        assert.is_true(found)
+      end)
+
+      it("populates hunk_map with entries", function()
+        diff.open("diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n", nil, {})
+        local p = diff.get_pending()
+        local has_entry = false
+        for lnum, entry in pairs(p.hunk_map) do
+          has_entry = true
+          assert.equals(1, entry.file_idx)
+          assert.equals(1, entry.hunk_idx)
+        end
+        assert.is_true(has_entry)
+      end)
+
+      it("populates hunk_starts list", function()
+        diff.open("diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n", nil, {})
+        local p = diff.get_pending()
+        assert.equals(1, #p.hunk_starts)
+      end)
+
+      it("records two hunk_starts for two hunks", function()
+        local patch = table.concat({
+          "diff --git a/a.lua b/a.lua",
+          "@@ -1,1 +1,1 @@",
+          "-a",
+          "+b",
+          "@@ -5,1 +5,1 @@",
+          "-c",
+          "+d",
+        }, "\n")
+        diff.open(patch, nil, {})
+        assert.equals(2, #diff.get_pending().hunk_starts)
+      end)
+    end)
+
+    describe("_accept_hunk_at_cursor()", function()
+      it("accepts the hunk under the cursor", function()
+        diff.open("diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n", nil, {})
+        local p = diff.get_pending()
+        diff.reject_hunk(1, 1)
+        -- place cursor on first hunk line
+        local hunk_line = p.hunk_starts[1]
+        vim.api.nvim_win_set_cursor(p.win, { hunk_line, 0 })
+        diff._accept_hunk_at_cursor()
+        assert.is_true(p.files[1].hunks[1].accepted)
+      end)
+    end)
+
+    describe("_reject_hunk_at_cursor()", function()
+      it("rejects the hunk under the cursor", function()
+        diff.open("diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n", nil, {})
+        local p = diff.get_pending()
+        local hunk_line = p.hunk_starts[1]
+        vim.api.nvim_win_set_cursor(p.win, { hunk_line, 0 })
+        diff._reject_hunk_at_cursor()
+        assert.is_false(p.files[1].hunks[1].accepted)
+      end)
+    end)
+
+    describe("_find_edit_window()", function()
+      it("returns a valid window", function()
+        local win = diff._find_edit_window()
+        assert.is_true(vim.api.nvim_win_is_valid(win))
+      end)
+
+      it("skips terminal buftype windows", function()
+        local term_buf = vim.api.nvim_create_buf(false, true)
+        vim.api.nvim_buf_set_option(term_buf, "buftype", "terminal")
+        local term_win = vim._next_winid
+        vim._next_winid = vim._next_winid + 1
+        vim._windows[term_win] = { buf = term_buf, width = 80 }
+        vim._win_tab[term_win] = 1
+        table.insert(vim._tab_windows[1], term_win)
+        vim._current_window = term_win
+
+        local win = diff._find_edit_window()
+        assert.not_equals(term_win, win)
+      end)
+
+      it("skips floating windows", function()
+        local float_buf = vim.api.nvim_create_buf(false, true)
+        local float_win = vim._next_winid
+        vim._next_winid = vim._next_winid + 1
+        vim._windows[float_win] = { buf = float_buf, width = 80, config = { relative = "editor" } }
+        vim._win_tab[float_win] = 1
+        table.insert(vim._tab_windows[1], float_win)
+        vim._current_window = float_win
+
+        local win = diff._find_edit_window()
+        assert.not_equals(float_win, win)
+      end)
+    end)
+
+    describe("_close_windows()", function()
+      it("closes the diff window after open()", function()
+        diff.open("diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n", nil, {})
+        local p = diff.get_pending()
+        local win = p.win
+        diff._close_windows()
+        assert.is_false(vim.api.nvim_win_is_valid(win))
+      end)
+
+      it("is safe when buf and win are nil", function()
+        diff.state.pending = { files = {}, respond_fn = nil, buf = nil, win = nil }
+        assert.has_no.errors(function() diff._close_windows() end)
+        diff.state.pending = nil
+      end)
+    end)
+
+    describe("navigation", function()
+      it("_goto_next_hunk moves cursor forward to second hunk", function()
+        local patch = table.concat({
+          "diff --git a/a.lua b/a.lua",
+          "@@ -1,1 +1,1 @@",
+          "-a",
+          "+b",
+          "@@ -5,1 +5,1 @@",
+          "-c",
+          "+d",
+        }, "\n")
+        diff.open(patch, nil, {})
+        local p = diff.get_pending()
+        local starts = p.hunk_starts
+        vim.api.nvim_win_set_cursor(p.win, { starts[1], 0 })
+        diff._goto_next_hunk()
+        local cursor = vim.api.nvim_win_get_cursor(p.win)
+        assert.equals(starts[2], cursor[1])
+      end)
+
+      it("_goto_prev_hunk moves cursor back to first hunk", function()
+        local patch = table.concat({
+          "diff --git a/a.lua b/a.lua",
+          "@@ -1,1 +1,1 @@",
+          "-a",
+          "+b",
+          "@@ -5,1 +5,1 @@",
+          "-c",
+          "+d",
+        }, "\n")
+        diff.open(patch, nil, {})
+        local p = diff.get_pending()
+        local starts = p.hunk_starts
+        vim.api.nvim_win_set_cursor(p.win, { starts[2], 0 })
+        diff._goto_prev_hunk()
+        local cursor = vim.api.nvim_win_get_cursor(p.win)
+        assert.equals(starts[1], cursor[1])
+      end)
+    end)
+
+    describe("keymaps", function()
+      it("sets 'A' keymap on diff buffer", function()
+        diff.open("diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n", nil, {})
+        assert.is_not_nil(vim._keymaps and vim._keymaps["n"] and vim._keymaps["n"]["A"])
+      end)
+
+      it("sets 'R' keymap on diff buffer", function()
+        diff.open("diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n", nil, {})
+        assert.is_not_nil(vim._keymaps["n"]["R"])
+      end)
+
+      it("'A' keymap calls accept_all", function()
+        diff.open("diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n", nil, {})
+        local accepted = false
+        -- override accept_all to track call
+        local orig = diff.accept_all
+        diff.accept_all = function() accepted = true end
+        vim._keymaps["n"]["A"].rhs()
+        diff.accept_all = orig
+        assert.is_true(accepted)
+      end)
+    end)
+  end)
 end)

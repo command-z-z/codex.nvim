@@ -154,11 +154,157 @@ function M.reject_hunk(file_idx, hunk_idx)
   M._refresh_buf()
 end
 
--- ── UI stubs (replaced in Task 3) ────────────────────────────────
+-- ── UI ────────────────────────────────────────────────────────────
 
-function M._open_ui() end
+local SKIP_FILETYPES = {
+  NvimTree = true, ["neo-tree"] = true, oil = true,
+  aerial = true, lazy = true,
+}
 
-function M._refresh_buf() end
+function M._find_edit_window()
+  local wins = vim.api.nvim_list_wins()
+  for _, winid in ipairs(wins) do
+    local cfg = vim.api.nvim_win_get_config(winid)
+    local is_floating = type(cfg.relative) == "string" and cfg.relative ~= ""
+    if not is_floating then
+      local bufnr = vim.api.nvim_win_get_buf(winid)
+      local bt = vim.api.nvim_buf_get_option(bufnr, "buftype") or ""
+      local ft = vim.api.nvim_buf_get_option(bufnr, "filetype") or ""
+      if bt ~= "terminal" and bt ~= "nofile" and not SKIP_FILETYPES[ft] then
+        return winid
+      end
+    end
+  end
+  return vim.api.nvim_get_current_win()
+end
+
+function M._open_ui()
+  local p = M.state.pending
+  if not p then return end
+  local cfg = p.config or {}
+
+  local target_win = M._find_edit_window()
+  vim.api.nvim_set_current_win(target_win)
+
+  if cfg.open_in_new_tab then
+    vim.cmd("tabnew")
+  elseif cfg.layout == "horizontal" then
+    vim.cmd("split")
+  else
+    vim.cmd("vsplit")
+  end
+
+  local win = vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_win_set_buf(win, buf)
+  vim.api.nvim_buf_set_name(buf, "CodexDiff")
+  vim.api.nvim_buf_set_option(buf, "filetype", "diff")
+  vim.api.nvim_buf_set_option(buf, "buftype", "nofile")
+  vim.api.nvim_buf_set_option(buf, "bufhidden", "wipe")
+  vim.api.nvim_buf_set_option(buf, "modifiable", false)
+
+  p.buf = buf
+  p.win = win
+
+  M._refresh_buf()
+  M._set_keymaps(buf)
+end
+
+function M._refresh_buf()
+  local p = M.state.pending
+  if not p or not p.buf then return end
+
+  local lines = {}
+  local hunk_map = {}
+  local hunk_starts = {}
+
+  for fi, file in ipairs(p.files) do
+    for _, h in ipairs(file.header) do
+      lines[#lines + 1] = h
+    end
+    for hi, hunk in ipairs(file.hunks) do
+      local marker = hunk.accepted and " [ACCEPT]" or " [REJECT]"
+      lines[#lines + 1] = hunk.header .. marker
+      local header_lnum = #lines
+      hunk_map[header_lnum] = { file_idx = fi, hunk_idx = hi }
+      hunk_starts[#hunk_starts + 1] = header_lnum
+      for _, hunk_line in ipairs(hunk.lines) do
+        lines[#lines + 1] = hunk_line
+        hunk_map[#lines] = { file_idx = fi, hunk_idx = hi }
+      end
+    end
+  end
+
+  p.hunk_map = hunk_map
+  p.hunk_starts = hunk_starts
+
+  vim.api.nvim_buf_set_option(p.buf, "modifiable", true)
+  vim.api.nvim_buf_set_lines(p.buf, 0, -1, false, lines)
+  vim.api.nvim_buf_set_option(p.buf, "modifiable", false)
+end
+
+function M._accept_hunk_at_cursor()
+  local p = M.state.pending
+  if not p or not p.hunk_map or not p.win then return end
+  local cursor = vim.api.nvim_win_get_cursor(p.win)
+  local entry = p.hunk_map[cursor[1]]
+  if entry then
+    M.set_accepted(p.files, entry.file_idx, entry.hunk_idx, true)
+    M._refresh_buf()
+  end
+end
+
+function M._reject_hunk_at_cursor()
+  local p = M.state.pending
+  if not p or not p.hunk_map or not p.win then return end
+  local cursor = vim.api.nvim_win_get_cursor(p.win)
+  local entry = p.hunk_map[cursor[1]]
+  if entry then
+    M.set_accepted(p.files, entry.file_idx, entry.hunk_idx, false)
+    M._refresh_buf()
+  end
+end
+
+function M._goto_next_hunk()
+  local p = M.state.pending
+  if not p or not p.win or not p.hunk_starts then return end
+  local cursor = vim.api.nvim_win_get_cursor(p.win)
+  local cur_line = cursor[1]
+  for _, lnum in ipairs(p.hunk_starts) do
+    if lnum > cur_line then
+      vim.api.nvim_win_set_cursor(p.win, { lnum, 0 })
+      return
+    end
+  end
+end
+
+function M._goto_prev_hunk()
+  local p = M.state.pending
+  if not p or not p.win or not p.hunk_starts then return end
+  local cursor = vim.api.nvim_win_get_cursor(p.win)
+  local cur_line = cursor[1]
+  local target = nil
+  for _, lnum in ipairs(p.hunk_starts) do
+    if lnum < cur_line then target = lnum end
+  end
+  if target then
+    vim.api.nvim_win_set_cursor(p.win, { target, 0 })
+  end
+end
+
+function M._set_keymaps(buf)
+  local function map(lhs, fn, desc)
+    vim.keymap.set("n", lhs, fn, { buffer = buf, desc = desc, noremap = true, silent = true })
+  end
+  map("a",    function() M._accept_hunk_at_cursor() end, "Accept hunk at cursor")
+  map("r",    function() M._reject_hunk_at_cursor() end, "Reject hunk at cursor")
+  map("A",    function() M.accept_all() end,              "Accept all hunks")
+  map("R",    function() M.deny_all()   end,              "Reject all hunks")
+  map("n",    function() M._goto_next_hunk() end,         "Next hunk")
+  map("p",    function() M._goto_prev_hunk() end,         "Previous hunk")
+  map("q",    function() M.deny_all()   end,              "Quit/deny diff")
+  map("<CR>", function() M.accept_all() end,              "Accept all")
+end
 
 function M._close_windows()
   local p = M.state.pending

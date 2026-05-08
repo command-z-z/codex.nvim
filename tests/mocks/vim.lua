@@ -132,8 +132,9 @@ local vim = {
 
       local lines = vim._buffers[bufnr].lines or {}
       local result = {}
+      local last = end_line == -1 and #lines or end_line
 
-      for i = start + 1, end_line do
+      for i = start + 1, last do
         table.insert(result, lines[i] or "")
       end
 
