@@ -962,9 +962,9 @@ local vim = {
     levels = {
       TRACE = 0,
       DEBUG = 1,
-      ERROR = 2,
+      INFO = 2,
       WARN = 3,
-      INFO = 4,
+      ERROR = 4,
     },
     -- Provides log level constants, similar to `vim.log.levels`.
     -- The actual logging functions (trace, debug, etc.) are no-ops in this mock.
