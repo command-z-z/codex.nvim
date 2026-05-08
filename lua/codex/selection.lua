@@ -112,13 +112,13 @@ function M.update_selection()
       M.state.last_active_visual_selection = {
         bufnr = current_buf,
         selection_data = vim.deepcopy(current_selection),
-        timestamp = vim.loop.now(),
       }
     else
       if M.state.last_active_visual_selection
         and M.state.last_active_visual_selection.bufnr == current_buf then
         M.state.last_active_visual_selection = nil
       end
+      return  -- don't fall through to cursor position while in visual mode
     end
   else
     local last_visual = M.state.last_active_visual_selection
@@ -229,8 +229,7 @@ local function get_selection_coordinates()
   end
 end
 
-local function extract_linewise_text(lines, start_coords)
-  start_coords.col = 1
+local function extract_linewise_text(lines)
   return table.concat(lines, "\n")
 end
 
@@ -275,7 +274,7 @@ function M.get_visual_selection()
 
   local text
   if vm == "V" then
-    text = extract_linewise_text(lines, sc)
+    text = extract_linewise_text(lines)
   elseif vm == "v" or vm == "\022" then
     text = extract_characterwise_text(lines, sc, ec)
     if not text then return nil end
