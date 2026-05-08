@@ -1,0 +1,88 @@
+require("busted_setup")
+
+describe("codex.terminal.external", function()
+  local external
+  local jobstart_calls, jobstop_calls
+
+  before_each(function()
+    package.loaded["codex.terminal.external"] = nil
+    jobstart_calls = {}
+    jobstop_calls = {}
+    _G.vim.fn.jobstart = function(cmd_arg, _opts)
+      table.insert(jobstart_calls, cmd_arg)
+      return 55
+    end
+    _G.vim.fn.jobstop = function(id)
+      table.insert(jobstop_calls, id)
+    end
+    external = require("codex.terminal.external")
+  end)
+
+  describe("is_available()", function()
+    it("returns true when external_terminal_cmd is a string", function()
+      assert.is_true(external.is_available({ provider_opts = { external_terminal_cmd = "alacritty -e %s" } }))
+    end)
+    it("returns true when external_terminal_cmd is a function", function()
+      assert.is_true(external.is_available({ provider_opts = { external_terminal_cmd = function() end } }))
+    end)
+    it("returns false when external_terminal_cmd is nil", function()
+      assert.is_false(external.is_available({ provider_opts = {} }))
+    end)
+    it("returns false when provider_opts is nil", function()
+      assert.is_false(external.is_available({}))
+    end)
+    it("returns false when opts is nil", function()
+      assert.is_false(external.is_available(nil))
+    end)
+  end)
+
+  it("get_active_bufnr() always returns nil", function()
+    assert.is_nil(external.get_active_bufnr())
+  end)
+
+  describe("open() with string template", function()
+    it("passes formatted command to jobstart", function()
+      external.open("codex", { provider_opts = { external_terminal_cmd = "alacritty -e %s" } })
+      assert.equals(1, #jobstart_calls)
+      assert.equals("alacritty -e codex", jobstart_calls[1])
+    end)
+    it("does not start a second job if already running", function()
+      external.open("codex", { provider_opts = { external_terminal_cmd = "alacritty -e %s" } })
+      external.open("codex", { provider_opts = { external_terminal_cmd = "alacritty -e %s" } })
+      assert.equals(1, #jobstart_calls)
+    end)
+  end)
+
+  describe("open() with function template", function()
+    it("calls the function with cmd and passes result to jobstart", function()
+      local fn_arg = nil
+      local fn = function(c) fn_arg = c; return { "alacritty", "-e", c } end
+      external.open("codex", { provider_opts = { external_terminal_cmd = fn } })
+      assert.equals("codex", fn_arg)
+      assert.equals(1, #jobstart_calls)
+      assert.same({ "alacritty", "-e", "codex" }, jobstart_calls[1])
+    end)
+  end)
+
+  describe("close()", function()
+    it("stops the job and resets state", function()
+      external.open("codex", { provider_opts = { external_terminal_cmd = "alacritty -e %s" } })
+      external.close()
+      assert.equals(1, #jobstop_calls)
+      assert.equals(55, jobstop_calls[1])
+    end)
+    it("is safe to call when not open", function()
+      assert.has_no.errors(function() external.close() end)
+    end)
+    it("allows re-open after close", function()
+      external.open("codex", { provider_opts = { external_terminal_cmd = "alacritty -e %s" } })
+      external.close()
+      external.open("codex", { provider_opts = { external_terminal_cmd = "alacritty -e %s" } })
+      assert.equals(2, #jobstart_calls)
+    end)
+  end)
+
+  it("ensure_visible() is a no-op", function()
+    assert.has_no.errors(function() external.ensure_visible() end)
+  end)
+end)
