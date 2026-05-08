@@ -59,9 +59,15 @@ end
 
 local function ensure_respond_to_server_request(method, params, respond)
     local ok, approval = pcall(require, "codex.handlers.approval")
-    if ok and approval.handle then
-        approval.handle(method, params, respond)
-    elseif method:find("requestUserInput", 1, true) or method:find("elicitation", 1, true) then
+    if ok and approval.APPROVAL_METHODS then
+        for _, m in ipairs(approval.APPROVAL_METHODS) do
+            if m == method then
+                approval.handle(method, params, respond)
+                return
+            end
+        end
+    end
+    if method:find("requestUserInput", 1, true) or method:find("elicitation", 1, true) then
         respond({ decision = "declined" })
     elseif method:find("requestApproval", 1, true) or method == "applyPatchApproval" then
         respond({ decision = "denied" })
