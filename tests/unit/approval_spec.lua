@@ -58,6 +58,12 @@ describe("codex.handlers.approval", function()
     it("returns {decision=declined} for elicitation", function()
       assert.same({ decision = "declined" }, approval._deny_result("mcpServer/elicitation/request"))
     end)
+    it("returns {decision=denied} for permissions", function()
+      assert.same({ decision = "denied" }, approval._deny_result("item/permissions/requestApproval"))
+    end)
+    it("returns {decision=denied} for fileChange", function()
+      assert.same({ decision = "denied" }, approval._deny_result("item/fileChange/requestApproval"))
+    end)
   end)
 
   describe("_get_policy()", function()
@@ -188,12 +194,19 @@ describe("codex.handlers.approval", function()
       assert.same({ decision = "declined" }, result)
     end)
 
-    it("includes method name in confirm prompt", function()
+    it("includes method info in confirm prompt", function()
       local prompt_text = nil
       vim.fn.confirm = function(msg, _, _) prompt_text = msg; return 1 end
       approval.handle("item/commandExecution/requestApproval", {}, function() end)
       assert.is_truthy(prompt_text)
-      assert.is_truthy(prompt_text:len() > 0)
+      assert.is_truthy(prompt_text:find("codex:", 1, true))
+    end)
+
+    it("uses params.description as label when provided", function()
+      local prompt_text = nil
+      vim.fn.confirm = function(msg, _, _) prompt_text = msg; return 1 end
+      approval.handle("item/commandExecution/requestApproval", { description = "rm -rf /tmp" }, function() end)
+      assert.is_truthy(prompt_text:find("rm -rf /tmp", 1, true))
     end)
 
     it("is safe (no errors) when prompt fires inside vim.schedule", function()

@@ -38,8 +38,9 @@ function M._get_policy()
 end
 
 function M._prompt_user(method, params, respond)
+  method = method or "(unknown)"
   vim.schedule(function()
-    local label = (params and (params.description or params.command or params.tool))
+    local label = (type(params) == "table" and (params.description or params.command or params.tool))
       or method
     local answer = vim.fn.confirm("codex: Allow " .. label .. "?", "&Allow\n&Deny", 2)
     if answer == 1 then
