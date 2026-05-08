@@ -308,6 +308,12 @@ describe("codex.init", function()
       cmd.cb({})
       assert.equals(1, diff_mock.calls)
     end)
+
+    it("is safe when no diff is pending (no-op)", function()
+      -- diff_mock.accept_all is already a no-op counter; calling with no pending is fine
+      local cmd = registered_cmds["CodexDiffAccept"]
+      assert.has_no.errors(function() cmd.cb({}) end)
+    end)
   end)
 
   describe("CodexDiffDeny command", function()
@@ -329,6 +335,11 @@ describe("codex.init", function()
       assert.is_not_nil(cmd)
       cmd.cb({})
       assert.equals(1, diff_mock.calls)
+    end)
+
+    it("is safe when no diff is pending (no-op)", function()
+      local cmd = registered_cmds["CodexDiffDeny"]
+      assert.has_no.errors(function() cmd.cb({}) end)
     end)
   end)
 end)

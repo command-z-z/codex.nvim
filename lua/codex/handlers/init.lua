@@ -3,6 +3,8 @@ local M = {}
 
 local _handlers = {}
 
+local _setup_done = false
+
 function M.register(method, handler)
   _handlers[method] = handler
 end
@@ -26,6 +28,8 @@ function M.handle_request(method, params, respond)
 end
 
 function M.setup()
+  if _setup_done then return end
+  _setup_done = true
   local diff_apply = require("codex.handlers.diff_apply")
   M.register("$/codex/fileChange", diff_apply)
 end
