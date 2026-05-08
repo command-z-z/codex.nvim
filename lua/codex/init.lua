@@ -9,6 +9,7 @@ M.state = {
   mention_queue = {},
   mention_timer = nil,
   connection_timer = nil,
+  selected_model = nil,
 }
 
 local function is_connected()
@@ -151,7 +152,21 @@ local function create_commands()
   end, { desc = "Deny pending Codex diff" })
 
   vim.api.nvim_create_user_command("CodexSelectModel", function()
-    vim.notify("CodexSelectModel: implemented in Phase 6", vim.log.levels.INFO)
+    local models = (M.state.config and M.state.config.models) or {}
+    if #models == 0 then
+      vim.notify("codex: no models configured — add models = {...} to setup()", vim.log.levels.WARN)
+      return
+    end
+    local names = {}
+    for _, m in ipairs(models) do
+      names[#names + 1] = m.name or m.value or tostring(m)
+    end
+    vim.ui.select(names, { prompt = "Select Codex model:" }, function(choice, idx)
+      if not choice then return end
+      local model = models[idx]
+      M.state.selected_model = model.value or model.name
+      vim.notify("codex: model set to " .. choice, vim.log.levels.INFO)
+    end)
   end, { desc = "Select Codex model" })
 
   vim.api.nvim_create_user_command("CodexStart", function()

@@ -342,4 +342,55 @@ describe("codex.init", function()
       assert.has_no.errors(function() cmd.cb({}) end)
     end)
   end)
+
+  describe("CodexSelectModel command", function()
+    before_each(function()
+      vim.ui = {
+        select = function(items, opts, cb)
+          vim._ui_select = { items = items, opts = opts, cb = cb }
+        end,
+      }
+      vim._ui_select = nil
+    end)
+
+    it("notifies when no models are configured", function()
+      codex.setup({ models = {} })
+      local notified = false
+      vim.notify = function(_, level)
+        if level == vim.log.levels.WARN then notified = true end
+      end
+      registered_cmds["CodexSelectModel"].cb({})
+      assert.is_true(notified)
+    end)
+
+    it("calls vim.ui.select with model names", function()
+      codex.setup({ models = {
+        { name = "GPT-4o", value = "gpt-4o" },
+        { name = "o1",     value = "o1" },
+      }})
+      registered_cmds["CodexSelectModel"].cb({})
+      assert.is_not_nil(vim._ui_select)
+      assert.same({ "GPT-4o", "o1" }, vim._ui_select.items)
+    end)
+
+    it("sets state.selected_model after selection", function()
+      codex.setup({ models = {
+        { name = "GPT-4o", value = "gpt-4o" },
+      }})
+      registered_cmds["CodexSelectModel"].cb({})
+      assert.is_not_nil(vim._ui_select)
+      vim._ui_select.cb("GPT-4o", 1)  -- simulate user picking first item
+      assert.equals("gpt-4o", codex.state.selected_model)
+    end)
+
+    it("does nothing when user cancels (nil choice)", function()
+      codex.setup({ models = {
+        { name = "GPT-4o", value = "gpt-4o" },
+      }})
+      codex.state.selected_model = nil
+      registered_cmds["CodexSelectModel"].cb({})
+      vim._ui_select.cb(nil, nil)
+      assert.is_nil(codex.state.selected_model)
+    end)
+  end)
 end)
