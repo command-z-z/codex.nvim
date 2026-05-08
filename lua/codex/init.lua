@@ -77,15 +77,17 @@ end
 local function start_server()
   local app_server = require("codex.app_server")
   local rpc_mod = require("codex.rpc")
+  local handlers = require("codex.handlers.init")
+  handlers.setup()
 
   app_server.ensure(function()
     local url = app_server.url()
     local rpc = rpc_mod.connect(url, {
-      on_notification = function(_method, _params)
-        -- Phase 4/5: handlers registered here
+      on_notification = function(method, params)
+        handlers.handle_notification(method, params)
       end,
-      on_request = function(_method, _params, _respond)
-        -- Phase 5: approval handler
+      on_request = function(method, params, respond)
+        handlers.handle_request(method, params, respond)
       end,
     })
     on_connected(rpc)
@@ -141,11 +143,11 @@ local function create_commands()
   end, { range = true, desc = "Send selection to Codex" })
 
   vim.api.nvim_create_user_command("CodexDiffAccept", function()
-    vim.notify("CodexDiffAccept: implemented in Phase 4", vim.log.levels.INFO)
+    require("codex.diff").accept_all()
   end, { desc = "Accept pending Codex diff" })
 
   vim.api.nvim_create_user_command("CodexDiffDeny", function()
-    vim.notify("CodexDiffDeny: implemented in Phase 4", vim.log.levels.INFO)
+    require("codex.diff").deny_all()
   end, { desc = "Deny pending Codex diff" })
 
   vim.api.nvim_create_user_command("CodexSelectModel", function()

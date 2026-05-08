@@ -24,7 +24,7 @@ describe("codex.init", function()
 
     -- stub all plugin dependencies
     package.loaded["codex.init"] = nil
-    for _, mod in ipairs({ "codex.config", "codex.terminal", "codex.app_server", "codex.rpc" }) do
+    for _, mod in ipairs({ "codex.config", "codex.terminal", "codex.app_server", "codex.rpc", "codex.handlers.init" }) do
       package.loaded[mod] = nil
     end
 
@@ -69,12 +69,19 @@ describe("codex.init", function()
         end,
       }
     end
+    package.preload["codex.handlers.init"] = function()
+      return {
+        setup = function() end,
+        handle_notification = function() end,
+        handle_request = function() end,
+      }
+    end
 
     codex = require("codex.init")
   end)
 
   after_each(function()
-    for _, mod in ipairs({ "codex.config", "codex.terminal", "codex.app_server", "codex.rpc" }) do
+    for _, mod in ipairs({ "codex.config", "codex.terminal", "codex.app_server", "codex.rpc", "codex.handlers.init" }) do
       package.preload[mod] = nil
     end
     -- restore nvim_create_user_command
@@ -278,6 +285,50 @@ describe("codex.init", function()
       stop_cmd.cb({})
       assert.is_nil(codex.state.rpc)
       assert.is_true(rpc_closed)
+    end)
+  end)
+
+  describe("CodexDiffAccept command", function()
+    local diff_mock
+
+    before_each(function()
+      diff_mock = { calls = 0, accept_all = function() diff_mock.calls = diff_mock.calls + 1 end }
+      package.preload["codex.diff"] = function() return diff_mock end
+      codex.setup({})
+    end)
+
+    after_each(function()
+      package.preload["codex.diff"] = nil
+      package.loaded["codex.diff"] = nil
+    end)
+
+    it("calls diff.accept_all()", function()
+      local cmd = registered_cmds["CodexDiffAccept"]
+      assert.is_not_nil(cmd)
+      cmd.cb({})
+      assert.equals(1, diff_mock.calls)
+    end)
+  end)
+
+  describe("CodexDiffDeny command", function()
+    local diff_mock
+
+    before_each(function()
+      diff_mock = { calls = 0, deny_all = function() diff_mock.calls = diff_mock.calls + 1 end }
+      package.preload["codex.diff"] = function() return diff_mock end
+      codex.setup({})
+    end)
+
+    after_each(function()
+      package.preload["codex.diff"] = nil
+      package.loaded["codex.diff"] = nil
+    end)
+
+    it("calls diff.deny_all()", function()
+      local cmd = registered_cmds["CodexDiffDeny"]
+      assert.is_not_nil(cmd)
+      cmd.cb({})
+      assert.equals(1, diff_mock.calls)
     end)
   end)
 end)
