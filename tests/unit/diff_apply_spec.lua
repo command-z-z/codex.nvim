@@ -143,4 +143,53 @@ describe("codex.handlers", function()
       end)
     end)
   end)
+
+  describe("handlers/init.lua setup() registers approval methods", function()
+    local approval_mock
+
+    before_each(function()
+      package.loaded["codex.handlers.init"] = nil
+      approval_mock = {
+        APPROVAL_METHODS = {
+          "item/commandExecution/requestApproval",
+          "item/permissions/requestApproval",
+          "item/fileChange/requestApproval",
+          "applyPatchApproval",
+          "item/tool/requestUserInput",
+          "mcpServer/elicitation/request",
+        },
+        handle_calls = {},
+        handle = function(method, params, respond)
+          table.insert(approval_mock.handle_calls, { method = method })
+          respond({ decision = "denied" }, nil)
+        end,
+      }
+      package.preload["codex.handlers.approval"] = function() return approval_mock end
+      handlers = require("codex.handlers.init")
+      handlers.setup()
+    end)
+
+    after_each(function()
+      package.preload["codex.handlers.approval"] = nil
+      package.loaded["codex.handlers.approval"] = nil
+    end)
+
+    it("registers handler for item/commandExecution/requestApproval", function()
+      local responded = false
+      handlers.handle_request("item/commandExecution/requestApproval", {}, function() responded = true end)
+      assert.is_true(responded)
+    end)
+
+    it("registers handler for applyPatchApproval", function()
+      local responded = false
+      handlers.handle_request("applyPatchApproval", {}, function() responded = true end)
+      assert.is_true(responded)
+    end)
+
+    it("routes request through approval.handle with correct method", function()
+      handlers.handle_request("item/permissions/requestApproval", {}, function() end)
+      assert.equals(1, #approval_mock.handle_calls)
+      assert.equals("item/permissions/requestApproval", approval_mock.handle_calls[1].method)
+    end)
+  end)
 end)

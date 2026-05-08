@@ -30,8 +30,19 @@ end
 function M.setup()
   if _setup_done then return end
   _setup_done = true
+
   local diff_apply = require("codex.handlers.diff_apply")
   M.register("$/codex/fileChange", diff_apply)
+
+  local approval = require("codex.handlers.approval")
+  for _, method in ipairs(approval.APPROVAL_METHODS) do
+    local m = method
+    M.register(m, {
+      on_request = function(params, respond)
+        approval.handle(m, params, respond)
+      end,
+    })
+  end
 end
 
 return M

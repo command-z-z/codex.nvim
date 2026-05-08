@@ -58,12 +58,13 @@ local function flush_waiters(err)
 end
 
 local function ensure_respond_to_server_request(method, params, respond)
-    if method == "item/commandExecution/requestApproval" or method == "item/permissions/requestApproval" then
-        respond({ decision = "denied" })
-    elseif method == "item/fileChange/requestApproval" or method == "applyPatchApproval" then
-        respond({ decision = "denied" })
-    elseif method == "item/tool/requestUserInput" or method == "mcpServer/elicitation/request" then
+    local ok, approval = pcall(require, "codex.handlers.approval")
+    if ok and approval.handle then
+        approval.handle(method, params, respond)
+    elseif method:find("requestUserInput", 1, true) or method:find("elicitation", 1, true) then
         respond({ decision = "declined" })
+    elseif method:find("requestApproval", 1, true) or method == "applyPatchApproval" then
+        respond({ decision = "denied" })
     else
         respond(nil, { code = -32601, message = "Method not found: " .. tostring(method) })
     end
