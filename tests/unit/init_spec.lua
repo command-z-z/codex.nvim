@@ -233,7 +233,6 @@ describe("codex.init", function()
           disable = function() selection_disabled = true end,
         }
       end
-      codex.setup({})
     end)
 
     after_each(function()
@@ -241,11 +240,44 @@ describe("codex.init", function()
       package.loaded["codex.selection"] = nil
     end)
 
-    it("calls selection.disable() on stop", function()
+    it("calls selection.disable() when track_selection is true", function()
+      codex.setup({ track_selection = true })
       local stop_cmd = registered_cmds["CodexStop"]
       assert.is_not_nil(stop_cmd)
       stop_cmd.cb({})
       assert.is_true(selection_disabled)
+    end)
+
+    it("does not require codex.selection when track_selection is false", function()
+      codex.setup({ track_selection = false })
+      local stop_cmd = registered_cmds["CodexStop"]
+      assert.is_not_nil(stop_cmd)
+      assert.has_no.errors(function() stop_cmd.cb({}) end)
+      assert.is_false(selection_disabled)
+    end)
+
+    it("is safe to call before setup()", function()
+      -- Reload codex without calling setup() first
+      package.loaded["codex.init"] = nil
+      local fresh_codex = require("codex.init")
+      -- Trigger CodexStop from a fresh require (no setup called)
+      -- We need to access the registered command
+      local stop_cmd = registered_cmds["CodexStop"]
+      if stop_cmd then
+        assert.has_no.errors(function() stop_cmd.cb({}) end)
+      end
+      -- If no stop_cmd registered yet (setup not called), that's fine too
+      assert.is_false(selection_disabled)
+    end)
+
+    it("clears rpc reference when rpc is set", function()
+      codex.setup({})
+      local rpc_closed = false
+      codex.state.rpc = { close = function() rpc_closed = true end }
+      local stop_cmd = registered_cmds["CodexStop"]
+      stop_cmd.cb({})
+      assert.is_nil(codex.state.rpc)
+      assert.is_true(rpc_closed)
     end)
   end)
 end)

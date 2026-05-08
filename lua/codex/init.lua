@@ -158,8 +158,9 @@ local function create_commands()
   end, { desc = "Start Codex app-server" })
 
   vim.api.nvim_create_user_command("CodexStop", function()
-    local selection = require("codex.selection")
-    selection.disable()
+    if M.state.config and M.state.config.track_selection then
+      require("codex.selection").disable()
+    end
     if M.state.rpc then
       M.state.rpc:close()
       M.state.rpc = nil
