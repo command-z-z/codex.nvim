@@ -9,7 +9,7 @@ end
 
 local function split_lines(text)
   local lines = {}
-  for line in (text .. "\n"):gmatch("(.-)\n") do
+  for line in (text:gsub("\r\n", "\n") .. "\n"):gmatch("(.-)\n") do
     lines[#lines + 1] = line
   end
   if lines[#lines] == "" then table.remove(lines) end

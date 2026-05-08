@@ -224,6 +224,14 @@ describe("codex.diff", function()
       diff.open("diff --git a/b.lua b/b.lua\n@@ -1,1 +1,1 @@\n-c\n+d\n", fn2, {})
       assert.equals(fn2, diff.get_pending().respond_fn)
     end)
+
+    it("silently drops old respond_fn when replacing session", function()
+      local fn1_called = false
+      local fn1 = function() fn1_called = true end
+      diff.open("diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n", fn1, {})
+      diff.open("diff --git a/b.lua b/b.lua\n@@ -1,1 +1,1 @@\n-c\n+d\n", nil, {})
+      assert.is_false(fn1_called)
+    end)
   end)
 
   -- ── accept_all ────────────────────────────────────────────────
