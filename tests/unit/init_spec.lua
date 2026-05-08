@@ -191,4 +191,61 @@ describe("codex.init", function()
       assert.is_false(codex.state.initialized)
     end)
   end)
+
+  describe("CodexSend command", function()
+    local vc_calls
+
+    before_each(function()
+      vc_calls = {}
+      package.preload["codex.visual_commands"] = function()
+        return {
+          handle_send = function(l1, l2)
+            table.insert(vc_calls, { line1 = l1, line2 = l2 })
+          end,
+        }
+      end
+      codex.setup({})
+    end)
+
+    after_each(function()
+      package.preload["codex.visual_commands"] = nil
+      package.loaded["codex.visual_commands"] = nil
+    end)
+
+    it("calls visual_commands.handle_send with line1 and line2", function()
+      local codex_send = registered_cmds["CodexSend"]
+      assert.is_not_nil(codex_send)
+      codex_send.cb({ line1 = 3, line2 = 7 })
+      assert.equals(1, #vc_calls)
+      assert.equals(3, vc_calls[1].line1)
+      assert.equals(7, vc_calls[1].line2)
+    end)
+  end)
+
+  describe("CodexStop command", function()
+    local selection_disabled
+
+    before_each(function()
+      selection_disabled = false
+      package.preload["codex.selection"] = function()
+        return {
+          enable = function() end,
+          disable = function() selection_disabled = true end,
+        }
+      end
+      codex.setup({})
+    end)
+
+    after_each(function()
+      package.preload["codex.selection"] = nil
+      package.loaded["codex.selection"] = nil
+    end)
+
+    it("calls selection.disable() on stop", function()
+      local stop_cmd = registered_cmds["CodexStop"]
+      assert.is_not_nil(stop_cmd)
+      stop_cmd.cb({})
+      assert.is_true(selection_disabled)
+    end)
+  end)
 end)

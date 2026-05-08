@@ -65,6 +65,10 @@ end
 
 local function on_connected(rpc)
   M.state.rpc = rpc
+  if M.state.config and M.state.config.track_selection then
+    local selection = require("codex.selection")
+    selection.enable(rpc, M.state.config.visual_demotion_delay_ms)
+  end
   if #M.state.mention_queue > 0 then
     schedule_flush()
   end
@@ -131,9 +135,9 @@ local function create_commands()
     M.enqueue_mention(text)
   end, { nargs = "+", complete = "file", desc = "Add file/range to Codex context" })
 
-  vim.api.nvim_create_user_command("CodexSend", function()
-    -- Phase 3: visual_commands.lua will handle this
-    vim.notify("CodexSend: implemented in Phase 3", vim.log.levels.INFO)
+  vim.api.nvim_create_user_command("CodexSend", function(args)
+    local visual_commands = require("codex.visual_commands")
+    visual_commands.handle_send(args.line1, args.line2)
   end, { range = true, desc = "Send selection to Codex" })
 
   vim.api.nvim_create_user_command("CodexDiffAccept", function()
@@ -154,6 +158,8 @@ local function create_commands()
   end, { desc = "Start Codex app-server" })
 
   vim.api.nvim_create_user_command("CodexStop", function()
+    local selection = require("codex.selection")
+    selection.disable()
     if M.state.rpc then
       M.state.rpc:close()
       M.state.rpc = nil
