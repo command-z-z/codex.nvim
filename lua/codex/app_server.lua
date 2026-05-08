@@ -29,6 +29,14 @@ local state = {
     stderr = {},
 }
 
+local _restart = {
+  attempts   = 0,
+  max        = 5,
+  base_ms    = 2000,
+  enabled    = true,
+  timer      = nil,
+}
+
 local function executable()
   return default_opts.codex_cmd
 end
@@ -52,9 +60,25 @@ end
 local function flush_waiters(err)
     local waiters = state.waiters
     state.waiters = {}
+    if not err then
+        _restart.attempts = 0
+    end
     for _, waiter in ipairs(waiters) do
         waiter(state.rpc, err)
     end
+end
+
+local function schedule_restart()
+  if not _restart.enabled then return end
+  if _restart.attempts >= _restart.max then return end
+  _restart.attempts = _restart.attempts + 1
+  local delay = math.min(_restart.base_ms * (2 ^ (_restart.attempts - 1)), 30000)
+  _restart.timer = vim.defer_fn(function()
+    _restart.timer = nil
+    if not state.job_id and _restart.enabled then
+      M.ensure(function() end)
+    end
+  end, delay)
 end
 
 local function ensure_respond_to_server_request(method, params, respond)
@@ -181,6 +205,8 @@ local function start_process()
             if #state.waiters > 0 then
                 local stderr = table.concat(state.stderr, "\n")
                 flush_waiters(stderr ~= "" and stderr or ("app-server exited with code " .. tostring(code)))
+            else
+                schedule_restart()
             end
         end,
     })
@@ -189,6 +215,7 @@ local function start_process()
 end
 
 function M.ensure(callback)
+    _restart.enabled = true
     if state.rpc and state.rpc.client and state.rpc.client.state == "connected" and state.initialized then
         callback(state.rpc, nil)
         return
@@ -398,6 +425,9 @@ function M.stop()
     state.connecting = false
     state.initialized = false
     state.waiters = {}
+    _restart.enabled = false
+    _restart.attempts = 0
+    _restart.timer = nil
 end
 
 function M._event_from_notification(method, params)
@@ -408,5 +438,9 @@ vim.api.nvim_create_autocmd("VimLeavePre", {
   group = vim.api.nvim_create_augroup("codex_app_server_cleanup", { clear = true }),
   callback = function() M.stop() end,
 })
+
+function M._restart_state()
+  return _restart
+end
 
 return M
