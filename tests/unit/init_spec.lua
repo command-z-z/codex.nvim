@@ -1,0 +1,150 @@
+require("busted_setup")
+
+describe("codex.init", function()
+  local codex
+  local registered_cmds, deferred_calls
+
+  before_each(function()
+    registered_cmds = {}
+    deferred_calls = {}
+
+    -- stub missing vim functions
+    _G.vim.defer_fn = function(fn, ms) table.insert(deferred_calls, { fn = fn, ms = ms }) end
+
+    -- stub vim.loop.now() if not present
+    if not _G.vim.loop then _G.vim.loop = {} end
+    if not _G.vim.loop.now then _G.vim.loop.now = function() return 0 end end
+
+    -- spy on nvim_create_user_command to track registrations
+    local original_create_cmd = _G.vim.api.nvim_create_user_command
+    _G.vim.api.nvim_create_user_command = function(name, cb, opts)
+      registered_cmds[name] = { cb = cb, opts = opts }
+      return original_create_cmd(name, cb, opts)
+    end
+
+    -- stub all plugin dependencies
+    package.loaded["codex.init"] = nil
+    for _, mod in ipairs({ "codex.config", "codex.terminal", "codex.app_server", "codex.rpc" }) do
+      package.loaded[mod] = nil
+    end
+
+    package.preload["codex.config"] = function()
+      return {
+        defaults = {},
+        apply = function(u)
+          return vim.tbl_extend("force", {
+            codex_cmd = "codex",
+            auto_start = false,  -- disable auto-start in tests
+            terminal = { provider = "native" },
+            approval = { policy = "prompt" },
+            queue_timeout = 5000,
+            connection_wait_delay = 600,
+            connection_timeout = 10000,
+          }, u or {})
+        end,
+        validate = function() end,
+      }
+    end
+    package.preload["codex.terminal"] = function()
+      return {
+        setup = function() end,
+        open = function() end,
+        close = function() end,
+        simple_toggle = function() end,
+        focus_toggle = function() end,
+        get_active_terminal_bufnr = function() return nil end,
+      }
+    end
+    package.preload["codex.app_server"] = function()
+      return {
+        ensure = function(cb) if cb then cb() end end,
+        stop = function() end,
+        url = function() return "ws://127.0.0.1:11111" end,
+      }
+    end
+    package.preload["codex.rpc"] = function()
+      return {
+        connect = function()
+          return { close = function() end, notify = function() end }
+        end,
+      }
+    end
+
+    codex = require("codex.init")
+  end)
+
+  after_each(function()
+    for _, mod in ipairs({ "codex.config", "codex.terminal", "codex.app_server", "codex.rpc" }) do
+      package.preload[mod] = nil
+    end
+    -- restore nvim_create_user_command
+    -- (mock reset happens in next before_each)
+  end)
+
+  describe("setup()", function()
+    it("sets initialized = true", function()
+      codex.setup({})
+      assert.is_true(codex.state.initialized)
+    end)
+    it("stores config in state", function()
+      codex.setup({ codex_cmd = "mycodex" })
+      assert.equals("mycodex", codex.state.config.codex_cmd)
+    end)
+    it("can be called twice without error", function()
+      assert.has_no.errors(function()
+        codex.setup({})
+        codex.setup({})
+      end)
+    end)
+  end)
+
+  describe("command registration", function()
+    before_each(function()
+      codex.setup({})
+    end)
+
+    local expected_commands = {
+      "Codex", "CodexFocus", "CodexOpen", "CodexClose",
+      "CodexAdd", "CodexSend", "CodexDiffAccept", "CodexDiffDeny",
+      "CodexSelectModel", "CodexStart", "CodexStop", "CodexStatus",
+    }
+
+    for _, name in ipairs(expected_commands) do
+      it("registers " .. name, function()
+        assert.is_not_nil(registered_cmds[name], name .. " should be registered")
+      end)
+    end
+  end)
+
+  describe("enqueue_mention()", function()
+    it("adds item to mention_queue", function()
+      codex.setup({})
+      codex.enqueue_mention("@hello")
+      assert.equals(1, #codex.state.mention_queue)
+      assert.equals("@hello", codex.state.mention_queue[1].text)
+    end)
+    it("sets expires_at on enqueued item", function()
+      codex.setup({})
+      codex.enqueue_mention("test")
+      assert.is_not_nil(codex.state.mention_queue[1].expires_at)
+    end)
+    it("enqueues multiple items", function()
+      codex.setup({})
+      codex.enqueue_mention("a")
+      codex.enqueue_mention("b")
+      assert.equals(2, #codex.state.mention_queue)
+    end)
+  end)
+
+  describe("initial state", function()
+    it("rpc is nil before setup", function()
+      assert.is_nil(codex.state.rpc)
+    end)
+    it("mention_queue starts empty", function()
+      assert.equals(0, #codex.state.mention_queue)
+    end)
+    it("initialized is false before setup", function()
+      assert.is_false(codex.state.initialized)
+    end)
+  end)
+end)
