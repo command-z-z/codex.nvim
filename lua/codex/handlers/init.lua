@@ -19,7 +19,9 @@ function M.handle_request(method, params, respond)
   if h and h.on_request then
     h.on_request(params, respond)
   else
-    respond(nil, { code = -32601, message = "Method not found: " .. tostring(method) })
+    if respond then
+      respond(nil, { code = -32601, message = "Method not found: " .. tostring(method) })
+    end
   end
 end
 
