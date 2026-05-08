@@ -114,6 +114,50 @@ describe("codex.init", function()
         assert.is_not_nil(registered_cmds[name], name .. " should be registered")
       end)
     end
+
+    it(":Codex --resume sets _open_flag", function()
+      local codex_cmd = registered_cmds["Codex"]
+      assert.is_not_nil(codex_cmd)
+      codex_cmd.cb({ args = "--resume" })
+      assert.equals("--resume", codex.state._open_flag)
+    end)
+
+    it(":Codex --continue sets _open_flag", function()
+      local codex_cmd = registered_cmds["Codex"]
+      codex_cmd.cb({ args = "--continue" })
+      assert.equals("--continue", codex.state._open_flag)
+    end)
+
+    it(":Codex with no arg clears _open_flag", function()
+      codex.state._open_flag = "--resume"
+      local codex_cmd = registered_cmds["Codex"]
+      codex_cmd.cb({ args = "" })
+      assert.is_nil(codex.state._open_flag)
+    end)
+
+    it(":CodexAdd with just file enqueues file path", function()
+      local add_cmd = registered_cmds["CodexAdd"]
+      assert.is_not_nil(add_cmd)
+      add_cmd.cb({ args = "src/foo.lua" })
+      assert.equals(1, #codex.state.mention_queue)
+      assert.equals("src/foo.lua", codex.state.mention_queue[1].text)
+    end)
+
+    it(":CodexAdd with file and start line enqueues path:line", function()
+      codex.state.mention_queue = {}
+      local add_cmd = registered_cmds["CodexAdd"]
+      add_cmd.cb({ args = "src/bar.lua 10" })
+      assert.equals(1, #codex.state.mention_queue)
+      assert.equals("src/bar.lua:10", codex.state.mention_queue[1].text)
+    end)
+
+    it(":CodexAdd with file and range enqueues path:start-end", function()
+      codex.state.mention_queue = {}
+      local add_cmd = registered_cmds["CodexAdd"]
+      add_cmd.cb({ args = "src/baz.lua 5 20" })
+      assert.equals(1, #codex.state.mention_queue)
+      assert.equals("src/baz.lua:5-20", codex.state.mention_queue[1].text)
+    end)
   end)
 
   describe("enqueue_mention()", function()

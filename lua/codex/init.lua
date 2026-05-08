@@ -45,7 +45,7 @@ function M.enqueue_mention(text)
   local timeout = (M.state.config and M.state.config.queue_timeout) or 5000
   table.insert(M.state.mention_queue, {
     text = text,
-    expires_at = vim.loop.now() + 5000,
+    expires_at = vim.loop.now() + timeout,
   })
   if is_connected() then
     schedule_flush()
