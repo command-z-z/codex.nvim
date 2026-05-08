@@ -30,6 +30,9 @@ describe("codex.terminal.snacks", function()
     it("close() does not error", function()
       assert.has_no.errors(function() snacks_mod.close() end)
     end)
+    it("focus_toggle() does not error", function()
+      assert.has_no.errors(function() snacks_mod.focus_toggle("codex", {}) end)
+    end)
   end)
 
   describe("with snacks mock", function()
@@ -86,6 +89,43 @@ describe("codex.terminal.snacks", function()
     it("_get_terminal_for_test() returns the stored terminal", function()
       snacks_mod.open("codex", {})
       assert.equals(fake_terminal_instance, snacks_mod._get_terminal_for_test())
+    end)
+
+    describe("focus_toggle()", function()
+      it("calls toggle when no terminal is open", function()
+        snacks_mod.focus_toggle("codex", {})
+        assert.equals(1, #toggle_calls)
+      end)
+
+      it("hides terminal when current window is the terminal", function()
+        local hidden = false
+        fake_terminal_instance.hide = function() hidden = true end
+        fake_terminal_instance.is_hidden = function() return false end
+        -- register win 88 so nvim_win_is_valid returns true
+        vim._mock.add_window(fake_terminal_instance.win, 77)
+        -- open first so terminal is tracked
+        snacks_mod.open("codex", {})
+        -- make current window = terminal window
+        _G.vim._current_window = fake_terminal_instance.win
+        toggle_calls = {}  -- reset
+        snacks_mod.focus_toggle("codex", {})
+        assert.is_true(hidden)
+      end)
+
+      it("focuses terminal when visible but not the current window", function()
+        local focused_win = nil
+        local original_set = _G.vim.api.nvim_set_current_win
+        _G.vim.api.nvim_set_current_win = function(w) focused_win = w; original_set(w) end
+        fake_terminal_instance.is_hidden = function() return false end
+        -- register win 88 so nvim_win_is_valid returns true
+        vim._mock.add_window(fake_terminal_instance.win, 77)
+        snacks_mod.open("codex", {})
+        _G.vim._current_window = 9999  -- different window
+        toggle_calls = {}
+        snacks_mod.focus_toggle("codex", {})
+        _G.vim.api.nvim_set_current_win = original_set
+        assert.equals(fake_terminal_instance.win, focused_win)
+      end)
     end)
   end)
 end)
