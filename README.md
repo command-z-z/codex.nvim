@@ -8,6 +8,7 @@ switching between AI assistants feels seamless.
 
 - Neovim ≥ 0.9
 - `codex` CLI installed and in `$PATH` (`npm install -g @openai/codex` or equivalent)
+- A Codex CLI version that supports `codex app-server` and TUI `--remote`
 
 ## Installation
 
@@ -67,7 +68,7 @@ require("codex").setup({
     open_in_new_tab     = false,
     keep_terminal_focus = false,
     on_new_file_reject  = "keep_empty",
-    hunk_level_review   = true,         -- per-hunk accept/reject (codex-specific)
+    hunk_level_review   = true,         -- mark hunks while reviewing; final approval is whole patch
   },
 
   -- Terminal
@@ -99,7 +100,7 @@ require("codex").setup({
 
 | Command | Description |
 |---------|-------------|
-| `:Codex` | Toggle Codex terminal panel |
+| `:Codex` | Toggle Codex terminal panel connected to the plugin app-server |
 | `:Codex --resume` | Resume last session |
 | `:Codex --continue` | Continue last session |
 | `:CodexFocus` | Smart focus/unfocus panel |
@@ -116,10 +117,13 @@ require("codex").setup({
 
 ### Diff buffer keymaps (active when a diff is shown)
 
+Diff opens automatically when Codex sends an `applyPatchApproval` request through the app-server connection.
+Final approval is whole-patch: use hunk markers while reviewing, then accept or reject the pending patch.
+
 | Key | Action |
 |-----|--------|
-| `a` | Accept hunk at cursor |
-| `r` | Reject hunk at cursor |
+| `a` | Mark hunk at cursor accepted |
+| `r` | Mark hunk at cursor rejected |
 | `A` / `<CR>` | Accept all hunks |
 | `R` / `q` | Reject all hunks |
 | `n` | Next hunk |
@@ -132,7 +136,7 @@ require("codex").setup({
 | `:CodexCLI` / `:CodexCLIToggle` | `:Codex` |
 | `:CodexToggle` | `:Codex` |
 | `:CodexResume` | `:Codex --resume` |
-| `:CodexDiff` / `:CodexDiffToggle` | Diff opens automatically; use `:CodexDiffAccept`/`:CodexDiffDeny` |
+| `:CodexDiff` / `:CodexDiffToggle` | Diff opens automatically from app-server approval requests; use `:CodexDiffAccept`/`:CodexDiffDeny` |
 | `:CodexApply` | `:CodexDiffAccept` |
 
 ## License

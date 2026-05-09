@@ -103,7 +103,7 @@ function M.open(patch, respond_fn, opts)
   end
   local files = M.parse(patch)
   if #files == 0 then
-    if respond_fn then respond_fn({ accepted = true, patch = "" }, nil) end
+    if respond_fn then respond_fn({ decision = "approved" }, nil) end
     return
   end
   M.state.pending = {
@@ -124,11 +124,10 @@ function M.accept_all()
   for i = 1, #p.files do
     M.set_accepted(p.files, i, nil, true)
   end
-  local patch = M.render(p.files, true)
   local respond_fn = p.respond_fn
   M._close_windows()
   M.state.pending = nil
-  if respond_fn then respond_fn({ accepted = true, patch = patch }, nil) end
+  if respond_fn then respond_fn({ decision = "approved" }, nil) end
 end
 
 function M.deny_all()
@@ -137,7 +136,7 @@ function M.deny_all()
   local respond_fn = p.respond_fn
   M._close_windows()
   M.state.pending = nil
-  if respond_fn then respond_fn({ accepted = false }, nil) end
+  if respond_fn then respond_fn({ decision = "denied" }, nil) end
 end
 
 function M.accept_hunk(file_idx, hunk_idx)

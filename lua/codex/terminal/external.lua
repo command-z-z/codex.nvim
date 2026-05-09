@@ -3,6 +3,24 @@ local M = {}
 
 local jobid = nil
 
+local function shellescape(arg)
+  if vim.fn and vim.fn.shellescape then
+    return vim.fn.shellescape(arg)
+  end
+  return "'" .. arg:gsub("'", [['"'"']]) .. "'"
+end
+
+local function shell_join(cmd)
+  if type(cmd) ~= "table" then
+    return cmd
+  end
+  local parts = {}
+  for _, arg in ipairs(cmd) do
+    parts[#parts + 1] = shellescape(tostring(arg))
+  end
+  return table.concat(parts, " ")
+end
+
 function M.is_available(opts)
   opts = opts or {}
   local ext_cmd = opts.provider_opts and opts.provider_opts.external_terminal_cmd
@@ -26,7 +44,7 @@ function M.open(cmd, opts)
   if type(ext_cmd) == "function" then
     launch_cmd = ext_cmd(cmd)
   else
-    launch_cmd = string.format(ext_cmd, cmd)
+    launch_cmd = string.format(ext_cmd, shell_join(cmd))
   end
 
   jobid = vim.fn.jobstart(launch_cmd, { detach = true })

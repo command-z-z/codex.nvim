@@ -2,13 +2,14 @@ require("busted_setup")
 
 describe("codex.init", function()
   local codex
-  local registered_cmds, deferred_calls, added_mentions, sent_texts
+  local registered_cmds, deferred_calls, added_mentions, sent_texts, handler_setup_calls
 
   before_each(function()
     registered_cmds = {}
     deferred_calls = {}
     added_mentions = {}
     sent_texts = {}
+    handler_setup_calls = 0
 
     -- stub missing vim functions
     _G.vim.defer_fn = function(fn, ms) table.insert(deferred_calls, { fn = fn, ms = ms }) end
@@ -38,7 +39,7 @@ describe("codex.init", function()
             codex_cmd = "codex",
             auto_start = false,  -- disable auto-start in tests
             terminal = { provider = "native" },
-            approval = { policy = "prompt" },
+            approval = { policy = "prompt", sandbox = "workspace-write" },
             queue_timeout = 5000,
             connection_wait_delay = 600,
             connection_timeout = 10000,
@@ -78,7 +79,7 @@ describe("codex.init", function()
     end
     package.preload["codex.handlers.init"] = function()
       return {
-        setup = function() end,
+        setup = function() handler_setup_calls = handler_setup_calls + 1 end,
         handle_notification = function() end,
         handle_request = function() end,
       }
@@ -109,6 +110,10 @@ describe("codex.init", function()
         codex.setup({})
         codex.setup({})
       end)
+    end)
+    it("registers handlers even when auto_start is false", function()
+      codex.setup({ auto_start = false })
+      assert.equals(1, handler_setup_calls)
     end)
   end)
 
@@ -195,7 +200,12 @@ describe("codex.init", function()
       ensure_cbs[1](nil, nil)
       -- open should have been called with --remote
       assert.equals(1, #open_calls)
-      assert.matches("--remote ws://127%.0%.0%.1:19999", open_calls[1])
+      assert.same({
+        "codex",
+        "--ask-for-approval", "on-request",
+        "--sandbox", "workspace-write",
+        "--remote", "ws://127.0.0.1:19999",
+      }, open_calls[1])
     end)
 
     it(":Codex --resume opens with resume --last and --remote", function()
@@ -203,9 +213,25 @@ describe("codex.init", function()
       registered_cmds["Codex"].cb({ args = "--resume" })
       ensure_cbs[1](nil, nil)
       assert.equals(1, #open_calls)
-      assert.matches("--remote ws://127%.0%.0%.1:19999", open_calls[1])
-      assert.matches("resume", open_calls[1])
-      assert.matches("%-%-last", open_calls[1])
+      assert.same({
+        "codex", "resume", "--last",
+        "--ask-for-approval", "on-request",
+        "--sandbox", "workspace-write",
+        "--remote", "ws://127.0.0.1:19999",
+      }, open_calls[1])
+    end)
+
+    it(":Codex --continue opens with resume --last and approval flags", function()
+      terminal_stub.get_active_terminal_bufnr = function() return nil end
+      registered_cmds["Codex"].cb({ args = "--continue" })
+      ensure_cbs[1](nil, nil)
+      assert.equals(1, #open_calls)
+      assert.same({
+        "codex", "resume", "--last",
+        "--ask-for-approval", "on-request",
+        "--sandbox", "workspace-write",
+        "--remote", "ws://127.0.0.1:19999",
+      }, open_calls[1])
     end)
 
     it(":Codex shows error and does NOT open when app-server fails", function()

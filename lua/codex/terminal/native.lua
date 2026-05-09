@@ -149,7 +149,9 @@ local function open_terminal(cmd_string, opts)
   end)
 
   local term_cmd_arg
-  if cmd_string:find(" ", 1, true) then
+  if type(cmd_string) == "table" then
+    term_cmd_arg = cmd_string
+  elseif cmd_string:find(" ", 1, true) then
     term_cmd_arg = vim.split(cmd_string, " ", { plain = true, trimempty = false })
   else
     term_cmd_arg = { cmd_string }

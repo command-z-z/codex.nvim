@@ -5,6 +5,24 @@ local M = {}
 
 local terminal = nil
 
+local function shellescape(arg)
+  if vim.fn and vim.fn.shellescape then
+    return vim.fn.shellescape(arg)
+  end
+  return "'" .. arg:gsub("'", [['"'"']]) .. "'"
+end
+
+local function shell_join(cmd)
+  if type(cmd) ~= "table" then
+    return cmd
+  end
+  local parts = {}
+  for _, arg in ipairs(cmd) do
+    parts[#parts + 1] = shellescape(tostring(arg))
+  end
+  return table.concat(parts, " ")
+end
+
 local function build_snacks_opts(opts)
   opts = opts or {}
   local split_side = opts.split_side or "right"
@@ -45,7 +63,7 @@ end
 
 function M.open(cmd, opts)
   if not M.is_available() then return end
-  terminal = Snacks.terminal.toggle(cmd, build_snacks_opts(opts))
+  terminal = Snacks.terminal.toggle(shell_join(cmd), build_snacks_opts(opts))
 end
 
 function M.close()
@@ -58,7 +76,7 @@ end
 
 function M.simple_toggle(cmd, opts)
   if not M.is_available() then return end
-  terminal = Snacks.terminal.toggle(cmd, build_snacks_opts(opts))
+  terminal = Snacks.terminal.toggle(shell_join(cmd), build_snacks_opts(opts))
 end
 
 function M.focus_toggle(cmd, opts)
@@ -74,7 +92,7 @@ function M.focus_toggle(cmd, opts)
       return
     end
   end
-  terminal = Snacks.terminal.toggle(cmd, build_snacks_opts(opts))
+  terminal = Snacks.terminal.toggle(shell_join(cmd), build_snacks_opts(opts))
 end
 
 function M.send_text(text)

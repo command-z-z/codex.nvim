@@ -276,16 +276,24 @@ These are server-initiated JSON-RPC calls with an `id`. The client **must** resp
 
 Server asks permission to apply a file patch.
 
-**Server sends:**
+**Server sends (Codex CLI 0.129.0):**
 ```json
 {
   "jsonrpc": "2.0",
   "id": <server-assigned-id>,
   "method": "applyPatchApproval",
   "params": {
+    "conversationId": "<thread id>",
     "callId": "<uuid>",
-    "patch": "<unified diff string>",
-    "reason": "<optional explanation>"
+    "fileChanges": {
+      "path/to/file": {
+        "type": "update",
+        "unified_diff": "<unified diff string>",
+        "move_path": null
+      }
+    },
+    "reason": "<optional explanation>",
+    "grantRoot": null
   }
 }
 ```
@@ -324,9 +332,11 @@ Server asks for additional filesystem/network permissions.
 
 ### `item/fileChange/requestApproval`
 
-Older alias for `applyPatchApproval` (same semantics, may appear in older protocol versions).
+V2 file-change approval. The request itself only identifies the pending item; the patch content is provided by earlier `item/fileChange/patchUpdated` or `turn/diff/updated` notifications.
 
-**Client response result:** `{ "decision": "approved" | "denied" }`
+**Server sends params:** `threadId`, `turnId`, `itemId`, optional `reason`, optional `grantRoot`.
+
+**Client response result:** `{ "decision": "accept" | "acceptForSession" | "decline" | "cancel" }`
 
 ### `item/tool/requestUserInput` (alias: `mcpServer/elicitation/request`)
 

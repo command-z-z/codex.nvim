@@ -4,8 +4,6 @@ local M = {}
 M.APPROVAL_METHODS = {
   "item/commandExecution/requestApproval",
   "item/permissions/requestApproval",
-  "item/fileChange/requestApproval",
-  "applyPatchApproval",
   "item/tool/requestUserInput",
   "mcpServer/elicitation/request",
 }

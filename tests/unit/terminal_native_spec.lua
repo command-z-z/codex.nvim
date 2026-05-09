@@ -155,6 +155,11 @@ describe("codex.terminal.native", function()
       assert.are.equal("codex", cmd[1])
     end)
 
+    it("passes argv command tables through without splitting", function()
+      native.open({ "codex", "resume", "--last", "--remote", "ws://127.0.0.1:19999" }, {})
+      assert.same({ "codex", "resume", "--last", "--remote", "ws://127.0.0.1:19999" }, termopen_calls[1].cmd)
+    end)
+
     it("get_active_bufnr() returns a valid bufnr after open()", function()
       native.open("codex", {})
       local b = native.get_active_bufnr()

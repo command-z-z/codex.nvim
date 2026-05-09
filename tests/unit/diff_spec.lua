@@ -63,12 +63,6 @@ describe("codex.diff", function()
       assert.is_true(files[1].binary)
     end)
 
-    it("all hunks start as accepted=true", function()
-      local patch = "diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n"
-      local files = diff.parse(patch)
-      assert.is_true(files[1].hunks[1].accepted)
-    end)
-
     it("parses multi-hunk file", function()
       local patch = table.concat({
         "diff --git a/file.lua b/file.lua",
@@ -100,6 +94,12 @@ describe("codex.diff", function()
       local patch = "diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-old\n+new\n"
       local files = diff.parse(patch)
       assert.equals(2, #files[1].hunks[1].lines)
+    end)
+
+    it("all hunks start as accepted=true", function()
+      local patch = "diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n"
+      local files = diff.parse(patch)
+      assert.is_true(files[1].hunks[1].accepted)
     end)
   end)
 
@@ -240,13 +240,13 @@ describe("codex.diff", function()
       assert.has_no.errors(function() diff.accept_all() end)
     end)
 
-    it("calls respond_fn with accepted=true", function()
+    it("calls respond_fn with approved decision", function()
       local result = nil
       diff.open("diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n",
         function(r) result = r end, {})
       diff.accept_all()
       assert.is_not_nil(result)
-      assert.is_true(result.accepted)
+      assert.equals("approved", result.decision)
     end)
 
     it("clears pending state", function()
@@ -255,13 +255,12 @@ describe("codex.diff", function()
       assert.is_false(diff.has_pending())
     end)
 
-    it("includes rendered patch in respond_fn result", function()
+    it("does not include a rendered patch in respond_fn result", function()
       local result = nil
       diff.open("diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n",
         function(r) result = r end, {})
       diff.accept_all()
-      assert.is_truthy(result.patch)
-      assert.is_truthy(result.patch:find("@@ -1,1 +1,1 @@", 1, true))
+      assert.is_nil(result.patch)
     end)
 
     it("is safe when respond_fn is nil", function()
@@ -276,12 +275,12 @@ describe("codex.diff", function()
       assert.has_no.errors(function() diff.deny_all() end)
     end)
 
-    it("calls respond_fn with accepted=false", function()
+    it("calls respond_fn with denied decision", function()
       local result = nil
       diff.open("diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n",
         function(r) result = r end, {})
       diff.deny_all()
-      assert.is_false(result.accepted)
+      assert.equals("denied", result.decision)
     end)
 
     it("clears pending state", function()
@@ -427,7 +426,6 @@ describe("codex.diff", function()
         diff.open("diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n", nil, {})
         local p = diff.get_pending()
         diff.reject_hunk(1, 1)
-        -- place cursor on first hunk line
         local hunk_line = p.hunk_starts[1]
         vim.api.nvim_win_set_cursor(p.win, { hunk_line, 0 })
         diff._accept_hunk_at_cursor()
@@ -437,12 +435,9 @@ describe("codex.diff", function()
       it("is a no-op when cursor is on a non-hunk line (file header)", function()
         diff.open("diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n", nil, {})
         local p = diff.get_pending()
-        -- Move cursor to line 1 (file header, not in hunk_map)
         vim.api.nvim_win_set_cursor(p.win, { 1, 0 })
-        -- Reject hunk first so we can verify accept doesn't fire
         diff.reject_hunk(1, 1)
         assert.has_no.errors(function() diff._accept_hunk_at_cursor() end)
-        -- hunk should still be rejected (no-op on header line)
         assert.is_false(p.files[1].hunks[1].accepted)
       end)
     end)

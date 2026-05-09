@@ -221,8 +221,6 @@ describe("codex.handlers.approval", function()
     local EXPECTED = {
       "item/commandExecution/requestApproval",
       "item/permissions/requestApproval",
-      "item/fileChange/requestApproval",
-      "applyPatchApproval",
       "item/tool/requestUserInput",
       "mcpServer/elicitation/request",
     }
@@ -237,8 +235,8 @@ describe("codex.handlers.approval", function()
       end
     end)
 
-    it("has exactly 6 methods", function()
-      assert.equals(6, #approval.APPROVAL_METHODS)
+    it("has exactly 4 methods", function()
+      assert.equals(4, #approval.APPROVAL_METHODS)
     end)
   end)
 end)

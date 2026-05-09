@@ -4,10 +4,12 @@ require("busted_setup")
 describe("codex.handlers", function()
   local handlers
   local diff_mock
+  local approval_policy
 
   before_each(function()
     package.loaded["codex.handlers.init"] = nil
     package.loaded["codex.handlers.diff_apply"] = nil
+    approval_policy = "prompt"
 
     diff_mock = {
       open_calls = {},
@@ -17,7 +19,7 @@ describe("codex.handlers", function()
     }
     package.preload["codex.diff"] = function() return diff_mock end
     package.preload["codex.init"] = function()
-      return { state = { config = { diff_opts = { layout = "vertical" } } } }
+      return { state = { config = { diff_opts = { layout = "vertical" }, approval = { policy = approval_policy } } } }
     end
 
     handlers = require("codex.handlers.init")
@@ -56,12 +58,14 @@ describe("codex.handlers", function()
 
     it("handle_request: calls registered handler's on_request with respond", function()
       local got_respond = nil
+      local got_method = nil
       handlers.register("$/test", {
-        on_request = function(_, respond) got_respond = respond end,
+        on_request = function(_, respond, method) got_respond = respond; got_method = method end,
       })
       local my_respond = function() end
       handlers.handle_request("$/test", {}, my_respond)
       assert.equals(my_respond, got_respond)
+      assert.equals("$/test", got_method)
     end)
 
     it("handle_notification: no error when handler has no on_notification field", function()
@@ -105,9 +109,56 @@ describe("codex.handlers", function()
       assert.equals("diff text", diff_mock.open_calls[1].patch)
     end)
 
-    it("on_request falls back to empty string when both missing", function()
-      diff_apply.on_request({}, function() end)
-      assert.equals("", diff_mock.open_calls[1].patch)
+    it("on_request renders applyPatchApproval fileChanges", function()
+      diff_apply.on_request({
+        fileChanges = {
+          ["ai.lua"] = {
+            type = "update",
+            unified_diff = "--- a/ai.lua\n+++ b/ai.lua\n@@ -1 +1 @@\n-old\n+new\n",
+          },
+        },
+      }, function() end, "applyPatchApproval")
+      local patch = diff_mock.open_calls[1].patch
+      assert.is_truthy(patch:find("diff --git a/ai.lua b/ai.lua", 1, true))
+      assert.is_truthy(patch:find("@@ -1 +1 @@", 1, true))
+    end)
+
+    it("on_request renders added fileChanges content", function()
+      diff_apply.on_request({
+        fileChanges = {
+          ["new.lua"] = {
+            type = "add",
+            content = "one\ntwo\n",
+          },
+        },
+      }, function() end, "applyPatchApproval")
+      local patch = diff_mock.open_calls[1].patch
+      assert.is_truthy(patch:find("new file mode", 1, true))
+      assert.is_truthy(patch:find("+one", 1, true))
+      assert.is_truthy(patch:find("+two", 1, true))
+    end)
+
+    it("on_request denies when no patch can be found", function()
+      local result
+      diff_apply.on_request({}, function(r) result = r end, "applyPatchApproval")
+      assert.equals(0, #diff_mock.open_calls)
+      assert.same({ decision = "denied" }, result)
+    end)
+
+    it("on_request auto-approves without opening diff when approval policy is auto-allow", function()
+      approval_policy = "auto-allow"
+      local result
+      diff_apply.on_request({ patch = "p" }, function(r) result = r end, "applyPatchApproval")
+      assert.equals(0, #diff_mock.open_calls)
+      assert.same({ decision = "approved" }, result)
+    end)
+
+    it("on_request auto-denies without opening diff when approval policy is auto-deny", function()
+      approval_policy = "auto-deny"
+      local result
+      diff_apply.on_request({ patch = "p" }, function(r) result = r end, "item/fileChange/requestApproval")
+      assert.equals(0, #diff_mock.open_calls)
+      assert.same({ decision = "decline" }, result)
     end)
 
     it("on_request passes diff_opts from config", function()
@@ -124,6 +175,39 @@ describe("codex.handlers", function()
     it("on_notification passes the patch string", function()
       diff_apply.on_notification({ patch = "notif patch" })
       assert.equals("notif patch", diff_mock.open_calls[1].patch)
+    end)
+
+    it("on_notification caches turn/diff/updated diff for later fileChange approval", function()
+      diff_apply.on_notification({
+        threadId = "thread-1",
+        turnId = "turn-1",
+        diff = "diff --git a/ai.lua b/ai.lua\n@@ -1 +1 @@\n-a\n+b\n",
+      }, "turn/diff/updated")
+
+      local result
+      diff_apply.on_request({ turnId = "turn-1" }, function(r) result = r end, "item/fileChange/requestApproval")
+      assert.equals(2, #diff_mock.open_calls)
+      assert.equals("diff --git a/ai.lua b/ai.lua\n@@ -1 +1 @@\n-a\n+b\n", diff_mock.open_calls[2].patch)
+
+      diff_mock.open_calls[2].respond_fn({ decision = "approved" })
+      assert.same({ decision = "accept" }, result)
+    end)
+
+    it("on_notification caches item/fileChange/patchUpdated changes by itemId", function()
+      diff_apply.on_notification({
+        itemId = "item-1",
+        changes = {
+          {
+            path = "ai.lua",
+            kind = { type = "update" },
+            diff = "--- a/ai.lua\n+++ b/ai.lua\n@@ -1 +1 @@\n-a\n+b\n",
+          },
+        },
+      }, "item/fileChange/patchUpdated")
+
+      diff_apply.on_request({ itemId = "item-1" }, function() end, "item/fileChange/requestApproval")
+      assert.equals(2, #diff_mock.open_calls)
+      assert.is_truthy(diff_mock.open_calls[2].patch:find("diff --git a/ai.lua b/ai.lua", 1, true))
     end)
 
     it("on_notification passes diff_opts from config", function()

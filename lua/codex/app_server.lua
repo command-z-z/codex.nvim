@@ -7,7 +7,7 @@ local default_opts = {
     port_range = { min = 10000, max = 65535 },
     startup_timeout_ms = 5000,
     request_timeout_ms = 120000,
-    approval_policy = "never",
+    approval_policy = "on-request",
     sandbox = "workspace-write",
   },
 }
@@ -48,13 +48,10 @@ local function app_config()
 end
 
 local function approval_policy_from_config(policy)
-    if policy == "prompt" or policy == "auto-allow" then
+    if policy == "prompt" or policy == "auto-allow" or policy == "auto-deny" then
         return "on-request"
     end
-    if policy == "auto-deny" then
-        return "never"
-    end
-    return policy or "never"
+    return policy or "on-request"
 end
 
 local function pick_port()

@@ -16,15 +16,42 @@ local function is_connected()
   return M.state.rpc ~= nil
 end
 
+local ensure_app_server
+
+local function approval_policy_for_cli(policy)
+  if policy == "prompt" or policy == "auto-allow" or policy == "auto-deny" then
+    return "on-request"
+  end
+  return policy or "on-request"
+end
+
+local function append_approval_args(cmd)
+  local approval = (M.state.config and M.state.config.approval) or {}
+  local policy = approval_policy_for_cli(approval.policy)
+  cmd[#cmd + 1] = "--ask-for-approval"
+  cmd[#cmd + 1] = policy
+
+  local sandbox = approval.sandbox or "workspace-write"
+  if sandbox and sandbox ~= "" then
+    cmd[#cmd + 1] = "--sandbox"
+    cmd[#cmd + 1] = sandbox
+  end
+end
+
 local function build_codex_cmd(flag)
   local base = (M.state.config and M.state.config.codex_cmd) or "codex"
   local url = require("codex.app_server").url()
   if not url then return nil end
-  local remote = " --remote " .. url
+  local cmd
   if flag == "--resume" or flag == "--continue" then
-    return base .. remote .. " resume --last"
+    cmd = { base, "resume", "--last" }
+  else
+    cmd = { base }
   end
-  return base .. remote
+  append_approval_args(cmd)
+  cmd[#cmd + 1] = "--remote"
+  cmd[#cmd + 1] = url
+  return cmd
 end
 
 local function flush_mentions()
@@ -52,14 +79,18 @@ local function flush_mentions()
   if terminal.get_active_terminal_bufnr() then
     send_all()
   else
-    local url = require("codex.app_server").url()
-    if not url then
-      vim.notify("codex: app-server not ready — cannot open terminal for mention", vim.log.levels.WARN)
-      return
-    end
-    local base = (M.state.config and M.state.config.codex_cmd) or "codex"
-    terminal.open(base .. " --remote " .. url)
-    vim.defer_fn(send_all, 1500)
+    ensure_app_server(function(cmd, err)
+      if err then
+        vim.notify("codex: app-server not ready — cannot open terminal for mention: " .. tostring(err), vim.log.levels.WARN)
+        return
+      end
+      if not cmd then
+        vim.notify("codex: app-server URL is not available", vim.log.levels.WARN)
+        return
+      end
+      terminal.open(cmd)
+      vim.defer_fn(send_all, 1500)
+    end)
   end
 end
 
@@ -87,6 +118,20 @@ local function on_connected(rpc)
   end
 end
 
+ensure_app_server = function(callback)
+  local app_server = require("codex.app_server")
+  app_server.ensure(function(rpc, err)
+    if err then
+      callback(nil, err)
+      return
+    end
+    if rpc and not is_connected() then
+      on_connected(rpc)
+    end
+    callback(build_codex_cmd(), nil)
+  end)
+end
+
 local function start_server()
   local app_server = require("codex.app_server")
   local handlers = require("codex.handlers.init")
@@ -104,30 +149,53 @@ end
 local function create_commands()
   local terminal = require("codex.terminal")
 
-  vim.api.nvim_create_user_command("Codex", function(args)
-    local arg = (args.args or ""):match("^%s*(.-)%s*$")
+  local function open_codex_terminal(flag, mode)
     if terminal.get_active_terminal_bufnr() then
-      terminal.simple_toggle()
+      if mode == "toggle" then
+        terminal.simple_toggle()
+      elseif mode == "focus" then
+        terminal.focus_toggle()
+      else
+        terminal.open()
+      end
       return
     end
+
     local app_server = require("codex.app_server")
-    app_server.ensure(function(_, err)
+    app_server.ensure(function(rpc, err)
       if err then
         vim.notify("codex: app-server not ready — " .. tostring(err), vim.log.levels.ERROR)
         return
       end
+      if rpc and not is_connected() then
+        on_connected(rpc)
+      end
+      local cmd = build_codex_cmd(flag)
+      if not cmd then
+        vim.notify("codex: app-server URL is not available", vim.log.levels.ERROR)
+        return
+      end
       vim.schedule(function()
-        terminal.open(build_codex_cmd(arg))
+        if mode == "focus" then
+          terminal.focus_toggle(cmd)
+        else
+          terminal.open(cmd)
+        end
       end)
     end)
+  end
+
+  vim.api.nvim_create_user_command("Codex", function(args)
+    local arg = (args.args or ""):match("^%s*(.-)%s*$")
+    open_codex_terminal(arg, "toggle")
   end, { nargs = "?", desc = "Toggle Codex panel" })
 
   vim.api.nvim_create_user_command("CodexFocus", function()
-    terminal.focus_toggle()
+    open_codex_terminal(nil, "focus")
   end, { desc = "Smart focus/unfocus Codex panel" })
 
   vim.api.nvim_create_user_command("CodexOpen", function()
-    terminal.open()
+    open_codex_terminal(nil, "open")
   end, { desc = "Open Codex panel" })
 
   vim.api.nvim_create_user_command("CodexClose", function()
@@ -213,12 +281,14 @@ end
 function M.setup(opts)
   local config = require("codex.config")
   local terminal = require("codex.terminal")
+  local handlers = require("codex.handlers.init")
 
   M.state.config = config.apply(opts or {})
   config.validate(M.state.config)
 
   terminal.setup(M.state.config)
   require("codex.app_server").configure(M.state.config)
+  handlers.setup()
   create_commands()
 
   M.state.initialized = true
