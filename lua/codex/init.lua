@@ -36,6 +36,8 @@ local function flush_mentions()
   for _, text in ipairs(queue) do
     terminal.send_text("@" .. text .. " ")
   end
+
+  terminal.open()
 end
 
 local function schedule_flush()
