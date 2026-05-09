@@ -27,11 +27,19 @@ plugin/codex.lua
 1. `terminal.simple_toggle()` opens the terminal split
 2. Codex CLI TUI runs inside the terminal; user types there
 
-### File-range mention (`:CodexAdd file.lua 10 20`)
+### File mention (`:CodexAdd`)
 
-1. `init.enqueue_mention("file.lua:10-20")` queues the text
-2. If connected: 50ms debounce → `rpc:notify("$/codex/mention", {text=...})`
-3. If not connected: queued with 5s expiry; flushed on connection
+1. `init.enqueue_mention(current_buf_path)` queues the file path
+2. 50ms debounce → `flush_mentions()`
+3. If terminal is open: `terminal.send_text("@<path> ")` injects via PTY channel
+4. If terminal is closed: `terminal.open()` first, then send after 1500ms startup delay
+5. Both `native` and `snacks` providers support PTY channel injection via `nvim_chan_send`
+
+### File-range mention (`:CodexSend` on visual selection)
+
+1. `visual_commands.handle_send(line1, line2)` builds `path:start-end`
+2. `init.enqueue_mention("path:start-end")` queues the mention
+3. Same flush path as `:CodexAdd` above
 
 ### Diff approval flow
 
@@ -70,7 +78,8 @@ codex app-server
 ## Key design decisions
 
 - **Pure Lua, zero runtime dependencies** — no plenary, no nui
-- **Two WebSocket connections** — `app_server.lua` manages process lifecycle and the initialization handshake; `init.lua` creates a second connection for editor-context notifications and diff/approval handlers
+- **Single WebSocket connection** — `app_server.lua` manages the process lifecycle, initialization handshake, and all RPC traffic (diff/approval). `init.lua` owns the mention queue and delegates to `terminal.send_text` for PTY injection
+- **PTY-based mention injection** — `@mention` text is sent directly to the codex CLI's PTY via `nvim_chan_send(jobid, text)`. Both `native` and `snacks` providers implement `send_text` using `b:terminal_job_id`
 - **Handlers dispatcher** — `handlers/init.lua` provides a registry so new RPC methods can be added without touching `init.lua`
 - **Hunk-level diff review** — `diff.lua` provides per-hunk accept/reject with `[ACCEPT]`/`[REJECT]` markers, unlike simple whole-file diff approaches
 - **50ms selection debounce** — prevents flooding the app-server with cursor-move events

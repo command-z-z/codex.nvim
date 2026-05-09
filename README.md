@@ -31,10 +31,11 @@ require("codex").setup({
 
 -- Recommended keymaps (mirrors claudecode.nvim)
 local map = vim.keymap.set
-map("n", "<leader>aa", "<cmd>Codex<cr>",          { desc = "Toggle Codex" })
-map("n", "<leader>ar", "<cmd>Codex --resume<cr>", { desc = "Resume Codex" })
-map("n", "<leader>af", "<cmd>CodexFocus<cr>",     { desc = "Focus Codex" })
-map({ "n", "v" }, "<leader>as", "<cmd>CodexSend<cr>", { desc = "Send to Codex" })
+map("n", "<leader>aa", "<cmd>Codex<cr>",            { desc = "Toggle Codex" })
+map("n", "<leader>ar", "<cmd>Codex --resume<cr>",   { desc = "Resume Codex" })
+map("n", "<leader>af", "<cmd>CodexFocus<cr>",       { desc = "Focus Codex" })
+map("n", "<leader>ab", "<cmd>CodexAdd<cr>",         { desc = "Add current buffer to Codex" })
+map("v", "<leader>as", ":'<,'>CodexSend<cr>",       { desc = "Send selection to Codex" })
 ```
 
 ## Configuration
@@ -104,8 +105,8 @@ require("codex").setup({
 | `:CodexFocus` | Smart focus/unfocus panel |
 | `:CodexOpen` | Open panel |
 | `:CodexClose` | Close panel |
-| `:CodexAdd <file> [start] [end]` | Add file/range to context |
-| `:CodexSend` | Send visual selection to Codex |
+| `:CodexAdd` | Add current buffer to Codex context |
+| `:CodexSend` | Send visual selection to Codex (use `:'<,'>CodexSend` in visual mode) |
 | `:CodexDiffAccept` | Accept pending diff |
 | `:CodexDiffDeny` | Deny pending diff |
 | `:CodexSelectModel` | Pick from configured models |

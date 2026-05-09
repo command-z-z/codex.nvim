@@ -77,6 +77,16 @@ function M.focus_toggle(cmd, opts)
   terminal = Snacks.terminal.toggle(cmd, build_snacks_opts(opts))
 end
 
+function M.send_text(text)
+  if not terminal then return end
+  local bufnr = terminal.buf
+  if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then return end
+  local ok, chan = pcall(vim.api.nvim_buf_get_var, bufnr, "terminal_job_id")
+  if ok and chan and chan > 0 then
+    vim.api.nvim_chan_send(chan, text)
+  end
+end
+
 function M._get_terminal_for_test()
   return terminal
 end

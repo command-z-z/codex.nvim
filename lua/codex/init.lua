@@ -21,9 +21,6 @@ local function flush_mentions()
     return
   end
   local terminal = require("codex.terminal")
-  if not terminal.send_text then
-    return
-  end
   local now = vim.loop.now()
   local queue = {}
   for _, item in ipairs(M.state.mention_queue) do
@@ -33,11 +30,21 @@ local function flush_mentions()
   end
   M.state.mention_queue = {}
 
-  for _, text in ipairs(queue) do
-    terminal.send_text("@" .. text .. " ")
+  if #queue == 0 then return end
+
+  local function send_all()
+    for _, text in ipairs(queue) do
+      terminal.send_text("@" .. text .. " ")
+    end
   end
 
-  terminal.open()
+  if terminal.get_active_terminal_bufnr() then
+    send_all()
+  else
+    terminal.open()
+    -- codex needs time to start and show its prompt
+    vim.defer_fn(send_all, 1500)
+  end
 end
 
 local function schedule_flush()
@@ -103,25 +110,15 @@ local function create_commands()
     terminal.close()
   end, { desc = "Close Codex panel" })
 
-  local add_handler = function(args)
-    local parts = {}
-    for part in (args.args .. " "):gmatch("([^%s]+)%s*") do
-      table.insert(parts, part)
-    end
-    local file = parts[1]
+  local add_handler = function()
+    local file = vim.api.nvim_buf_get_name(0)
     if not file or file == "" then
-      vim.notify("CodexAdd: file argument required", vim.log.levels.ERROR)
+      vim.notify("CodexAdd: current buffer has no file name", vim.log.levels.ERROR)
       return
     end
-    local text = file
-    if parts[2] then
-      text = text .. ":" .. parts[2]
-      if parts[3] then text = text .. "-" .. parts[3] end
-    end
-    M.enqueue_mention(text)
+    M.enqueue_mention(file)
   end
-  vim.api.nvim_create_user_command("CodexAdd", add_handler, { nargs = "+", complete = "file", desc = "Add file/range to Codex context" })
-  vim.api.nvim_create_user_command("Codexadd", add_handler, { nargs = "+", complete = "file", desc = "Alias for CodexAdd" })
+  vim.api.nvim_create_user_command("CodexAdd", add_handler, { desc = "Add current buffer" })
 
   local visual_commands = require("codex.visual_commands")
   local send_handler = visual_commands.create_visual_command_wrapper(
@@ -133,7 +130,6 @@ local function create_commands()
       end
     )
   vim.api.nvim_create_user_command("CodexSend", send_handler, { range = true, desc = "Send selection to Codex" })
-  vim.api.nvim_create_user_command("Codexsend", send_handler, { range = true, desc = "Alias for CodexSend" })
 
   vim.api.nvim_create_user_command("CodexDiffAccept", function()
     require("codex.diff").accept_all()

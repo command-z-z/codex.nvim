@@ -8,6 +8,7 @@ local default_opts = {
     startup_timeout_ms = 5000,
     request_timeout_ms = 120000,
     approval_policy = "never",
+    sandbox = "workspace-write",
   },
 }
 
@@ -25,6 +26,7 @@ local state = {
     url = nil,
     connecting = false,
     initialized = false,
+    thread_id = nil,
     waiters = {},
     stderr = {},
 }
@@ -43,6 +45,16 @@ end
 
 local function app_config()
   return default_opts.app_server
+end
+
+local function approval_policy_from_config(policy)
+    if policy == "prompt" or policy == "auto-allow" then
+        return "on-request"
+    end
+    if policy == "auto-deny" then
+        return "never"
+    end
+    return policy or "never"
 end
 
 local function pick_port()
@@ -135,6 +147,7 @@ local function connect_when_ready(deadline_ms)
     local rpc, err = rpc_client.connect(state.url, {
         request_timeout_ms = app_config().request_timeout_ms,
         on_open = function(opened_rpc)
+            state.rpc = opened_rpc
             initialize(opened_rpc, function(init_err)
                 if init_err then
                     flush_waiters(init_err)
@@ -181,8 +194,6 @@ local function connect_when_ready(deadline_ms)
         end
         return
     end
-
-    state.rpc = rpc
 end
 
 local function start_process()
@@ -265,7 +276,7 @@ end
 local function start_thread(rpc, opts, callback)
     rpc:request("thread/start", {
         cwd = opts.cwd or cwd(),
-        sandbox = opts.sandbox or "workspace-write",
+        sandbox = opts.sandbox or app_config().sandbox or "workspace-write",
         approvalPolicy = (app_config().approval_policy or "never"),
         model = opts.model,
         config = opts.profile and { profile = opts.profile } or nil,
@@ -280,8 +291,70 @@ local function start_thread(rpc, opts, callback)
             callback(nil, "thread/start response did not include a thread id")
             return
         end
+        state.thread_id = thread_id
         callback(thread_id, nil)
     end, app_config().request_timeout_ms)
+end
+
+local function ensure_thread(rpc, opts, callback)
+    if opts.thread_id then
+        callback(opts.thread_id, nil)
+        return
+    end
+    if state.thread_id then
+        callback(state.thread_id, nil)
+        return
+    end
+    start_thread(rpc, opts, callback)
+end
+
+local function parse_mention(text)
+    local path, start_line, end_line = text:match("^(.-):(%d+)%-(%d+)$")
+    if path then
+        return path, tonumber(start_line), tonumber(end_line)
+    end
+
+    path, start_line = text:match("^(.-):(%d+)$")
+    if path then
+        local line = tonumber(start_line)
+        return path, line, line
+    end
+
+    return text, nil, nil
+end
+
+local function mention_name(path)
+    local ok, name = pcall(vim.fn.fnamemodify, path, ":t")
+    if ok and name and name ~= "" then
+        return name
+    end
+    return path
+end
+
+local function mention_input_items(mentions)
+    local input = {
+        {
+            type = "text",
+            text = "Add the referenced file context.",
+        },
+    }
+
+    for _, text in ipairs(mentions or {}) do
+        local path, start_line, end_line = parse_mention(text)
+        input[#input + 1] = {
+            type = "mention",
+            name = mention_name(path),
+            path = path,
+        }
+        if start_line and end_line then
+            input[#input + 1] = {
+                type = "text",
+                text = string.format("Use lines %d-%d from %s.", start_line, end_line, path),
+            }
+        end
+    end
+
+    return input
 end
 
 local function event_from_notification(method, params)
@@ -417,6 +490,58 @@ function M.run_prompt(prompt, opts)
     end)
 end
 
+function M.add_mentions(mentions, opts)
+    opts = opts or {}
+    if type(mentions) == "string" then
+        mentions = { mentions }
+    end
+    if type(mentions) ~= "table" or #mentions == 0 then
+        return
+    end
+
+    M.ensure(function(rpc, err)
+        if err then
+            notify_error(err)
+            return
+        end
+
+        ensure_thread(rpc, opts, function(thread_id, thread_err)
+            if thread_err then
+                notify_error(thread_err)
+                return
+            end
+
+            rpc:request("turn/start", {
+                threadId = thread_id,
+                cwd = opts.cwd or cwd(),
+                sandboxPolicy = opts.sandbox or app_config().sandbox or "workspace-write",
+                approvalPolicy = (app_config().approval_policy or "never"),
+                model = opts.model,
+                input = mention_input_items(mentions),
+            }, function(_, turn_err)
+                if turn_err then
+                    notify_error(turn_err.message or "turn/start failed")
+                end
+            end, app_config().request_timeout_ms)
+        end)
+    end)
+end
+
+function M.configure(config)
+    config = config or {}
+    default_opts.codex_cmd = config.codex_cmd or default_opts.codex_cmd
+
+    if config.port_range then
+        default_opts.app_server.port_range = config.port_range
+    end
+    if config.approval and config.approval.policy then
+        default_opts.app_server.approval_policy = approval_policy_from_config(config.approval.policy)
+    end
+    if config.approval and config.approval.sandbox then
+        default_opts.app_server.sandbox = config.approval.sandbox
+    end
+end
+
 function M.url()
     return state.url
 end
@@ -433,6 +558,7 @@ function M.stop()
     state.url = nil
     state.connecting = false
     state.initialized = false
+    state.thread_id = nil
     state.waiters = {}
     _restart.enabled = false
     _restart.attempts = 0

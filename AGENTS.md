@@ -2,7 +2,27 @@
 
 ## Project Structure & Module Organization
 
-This repository is a Neovim Lua plugin. Runtime entrypoints live in `plugin/codex.lua`, which registers plugin loading behavior, and implementation modules live under `lua/codex/`. Core modules include `config.lua`, `cli.lua`, `context.lua`, `diff.lua`, and `ui.lua`; UI-specific helpers are grouped in `lua/codex/ui/`. Tests are in `tests/` and use `tests/minimal_init.lua` to add this checkout plus local `plenary.nvim` and `nui.nvim` installs to Neovim's runtime path.
+This repository is a Neovim Lua plugin with zero runtime dependencies (no plenary, no nui).
+Runtime entrypoint: `plugin/codex.lua`. Implementation modules live under `lua/codex/`:
+
+| Module | Role |
+|--------|------|
+| `init.lua` | Command registration, mention queue, connection orchestration |
+| `config.lua` | Defaults and validation |
+| `app_server.lua` | Codex process lifecycle, WebSocket client, JSON-RPC 2.0 |
+| `rpc.lua` | JSON-RPC request/notify/respond primitives |
+| `transport/` | Pure-Lua WebSocket (TCP + framing + handshake) |
+| `terminal.lua` | Provider abstraction (`native` / `snacks` / `external` / `none`) |
+| `terminal/native.lua` | Neovim built-in terminal provider |
+| `terminal/snacks.lua` | snacks.nvim terminal provider |
+| `selection.lua` | Cursor/visual-selection tracking (50ms debounce) |
+| `visual_commands.lua` | Range command helpers for `CodexSend` |
+| `diff.lua` | Unified-diff viewer with per-hunk accept/reject |
+| `handlers/init.lua` | RPC method dispatcher |
+| `handlers/diff_apply.lua` | `applyPatchApproval` handler |
+| `handlers/approval.lua` | Shell-command approval handler |
+
+Tests live in `tests/` and use `tests/minimal_init.lua` as the headless init file.
 
 ## Build, Test, and Development Commands
 
@@ -15,22 +35,35 @@ nvim --headless -u tests/minimal_init.lua \
   -c 'PlenaryBustedDirectory tests { minimal_init = "tests/minimal_init.lua" }'
 ```
 
-For local manual testing, install this checkout through your plugin manager with `dir = "/home/eugene/Desktop/MyRepo/codex.nvim"` and call `require("codex").setup()`. The plugin expects Neovim 0.10+, `plenary.nvim`, `nui.nvim`, and the `codex` CLI in `$PATH`.
+For local manual testing, install this checkout through your plugin manager with
+`dir = "/path/to/codex.nvim"` and call `require("codex").setup()`.
+The plugin requires Neovim ≥ 0.9 and the `codex` CLI in `$PATH`.
 
 ## Coding Style & Naming Conventions
 
-Use Lua module tables with `local M = {}` and return `M` from modules. Follow the existing four-space indentation style and prefer snake_case for functions, local variables, and option keys. Keep modules focused: command registration belongs in `lua/codex/init.lua`, defaults in `lua/codex/config.lua`, and interface behavior in `lua/codex/ui*.lua`. Prefer Neovim APIs and Plenary helpers already used in the codebase over introducing new dependencies.
+- Lua module tables: `local M = {}` … `return M`
+- Four-space indentation, snake_case throughout
+- Command registration in `init.lua`, defaults in `config.lua`
+- No new runtime dependencies — use Neovim APIs and libuv only
 
 ## Testing Guidelines
 
-Tests use Plenary's busted-style framework. Add or update `*_spec.lua` files in `tests/` near the behavior being changed, for example `diff_spec.lua` for patch parsing or `cli_spec.lua` for terminal behavior. Keep tests deterministic and avoid requiring a real Codex network session; mock jobs, buffers, or CLI results when possible. Run the full headless Neovim command before submitting changes.
+Tests use Plenary's busted-style framework. Add or update `*_spec.lua` files in `tests/`
+near the behavior being changed. Keep tests deterministic; mock jobs, buffers, and
+terminal state rather than requiring a live codex session. Run the full headless suite
+before submitting changes.
 
 ## Commit & Pull Request Guidelines
 
-Recent commits use concise imperative subjects such as `Refactor Codex UI helpers` and `Improve Codex UI and CLI workflow`. Keep commit titles short, capitalized, and focused on the user-visible or architectural change.
+Use concise imperative subjects: `feat:`, `fix:`, `refactor:`, `docs:`, `test:` prefixes.
+Keep titles short and focused on the user-visible or architectural change.
 
-Pull requests should include a brief description, the commands run for verification, and screenshots or terminal notes for UI changes to panels, floating terminals, or diff review behavior. Link related issues when applicable and call out any dependency or configuration changes.
+Pull requests should include a brief description and the commands run for verification.
+Call out any configuration key additions or removals — update `README.md` accordingly.
 
 ## Agent-Specific Instructions
 
-Do not rewrite unrelated plugin behavior while addressing a narrow issue. Preserve existing user configuration keys where possible, and update `README.md` when commands, defaults, dependencies, or user-facing keymaps change.
+- Do not rewrite unrelated behavior while fixing a narrow issue.
+- Preserve existing configuration keys; add new ones with sensible defaults.
+- Update `README.md` when commands, defaults, or user-facing keymaps change.
+- Update `ARCHITECTURE.md` when data-flow or module relationships change.
