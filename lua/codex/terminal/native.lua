@@ -289,6 +289,14 @@ function M.get_active_bufnr()
   return nil
 end
 
+---Send text directly into the terminal's stdin channel.
+---@param text string
+function M.send_text(text)
+  if jobid and jobid > 0 then
+    vim.api.nvim_chan_send(jobid, text)
+  end
+end
+
 ---Always available — native Neovim terminal is built-in.
 ---@return boolean
 function M.is_available()

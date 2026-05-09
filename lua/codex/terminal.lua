@@ -89,6 +89,14 @@ function M.get_active_terminal_bufnr()
   return active_provider.get_active_bufnr()
 end
 
+---Send text into the terminal stdin (e.g. "@file:1-10 " for context injection).
+---@param text string
+function M.send_text(text)
+  if active_provider and active_provider.send_text then
+    active_provider.send_text(text)
+  end
+end
+
 -- test helper
 function M._get_active_provider_name()
   return active_provider_name

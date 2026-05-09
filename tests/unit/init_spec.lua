@@ -2,11 +2,13 @@ require("busted_setup")
 
 describe("codex.init", function()
   local codex
-  local registered_cmds, deferred_calls
+  local registered_cmds, deferred_calls, added_mentions, sent_texts
 
   before_each(function()
     registered_cmds = {}
     deferred_calls = {}
+    added_mentions = {}
+    sent_texts = {}
 
     -- stub missing vim functions
     _G.vim.defer_fn = function(fn, ms) table.insert(deferred_calls, { fn = fn, ms = ms }) end
@@ -53,11 +55,16 @@ describe("codex.init", function()
         simple_toggle = function() end,
         focus_toggle = function() end,
         get_active_terminal_bufnr = function() return nil end,
+        send_text = function(text) table.insert(sent_texts, text) end,
       }
     end
     package.preload["codex.app_server"] = function()
       return {
         ensure = function(cb) if cb then cb() end end,
+        add_mentions = function(mentions)
+          table.insert(added_mentions, mentions)
+        end,
+        configure = function() end,
         stop = function() end,
         url = function() return "ws://127.0.0.1:11111" end,
       }
@@ -112,7 +119,7 @@ describe("codex.init", function()
 
     local expected_commands = {
       "Codex", "CodexFocus", "CodexOpen", "CodexClose",
-      "CodexAdd", "CodexSend", "CodexDiffAccept", "CodexDiffDeny",
+      "CodexAdd", "Codexadd", "CodexSend", "Codexsend", "CodexDiffAccept", "CodexDiffDeny",
       "CodexSelectModel", "CodexStart", "CodexStop", "CodexStatus",
     }
 
@@ -150,6 +157,15 @@ describe("codex.init", function()
       assert.equals("src/foo.lua", codex.state.mention_queue[1].text)
     end)
 
+    it(":Codexadd alias enqueues file path", function()
+      codex.state.mention_queue = {}
+      local add_cmd = registered_cmds["Codexadd"]
+      assert.is_not_nil(add_cmd)
+      add_cmd.cb({ args = "src/alias.lua" })
+      assert.equals(1, #codex.state.mention_queue)
+      assert.equals("src/alias.lua", codex.state.mention_queue[1].text)
+    end)
+
     it(":CodexAdd with file and start line enqueues path:line", function()
       codex.state.mention_queue = {}
       local add_cmd = registered_cmds["CodexAdd"]
@@ -164,6 +180,21 @@ describe("codex.init", function()
       add_cmd.cb({ args = "src/baz.lua 5 20" })
       assert.equals(1, #codex.state.mention_queue)
       assert.equals("src/baz.lua:5-20", codex.state.mention_queue[1].text)
+    end)
+
+    it(":CodexAdd flushes mentions via terminal.send_text as @file injection", function()
+      codex.setup({})
+      codex.state.mention_queue = {}
+      sent_texts = {}
+
+      local add_cmd = registered_cmds["CodexAdd"]
+      add_cmd.cb({ args = "src/qux.lua 2 4" })
+      assert.equals(1, #deferred_calls)
+      deferred_calls[1].fn()
+
+      assert.equals(0, #added_mentions)
+      assert.equals(1, #sent_texts)
+      assert.equals("@src/qux.lua:2-4 ", sent_texts[1])
     end)
   end)
 
@@ -204,8 +235,15 @@ describe("codex.init", function()
 
     before_each(function()
       vc_calls = {}
+      package.loaded["codex.visual_commands"] = nil
       package.preload["codex.visual_commands"] = function()
         return {
+          create_visual_command_wrapper = function(normal_handler, visual_handler)
+            return function(...)
+              table.insert(vc_calls, { wrapped = true })
+              return normal_handler(...)
+            end
+          end,
           handle_send = function(l1, l2)
             table.insert(vc_calls, { line1 = l1, line2 = l2 })
           end,
@@ -223,9 +261,20 @@ describe("codex.init", function()
       local codex_send = registered_cmds["CodexSend"]
       assert.is_not_nil(codex_send)
       codex_send.cb({ line1 = 3, line2 = 7 })
-      assert.equals(1, #vc_calls)
-      assert.equals(3, vc_calls[1].line1)
-      assert.equals(7, vc_calls[1].line2)
+      assert.equals(2, #vc_calls)
+      assert.is_true(vc_calls[1].wrapped)
+      assert.equals(3, vc_calls[2].line1)
+      assert.equals(7, vc_calls[2].line2)
+    end)
+
+    it(":Codexsend alias calls visual_commands.handle_send", function()
+      local codex_send = registered_cmds["Codexsend"]
+      assert.is_not_nil(codex_send)
+      codex_send.cb({ line1 = 4, line2 = 8 })
+      assert.equals(2, #vc_calls)
+      assert.is_true(vc_calls[1].wrapped)
+      assert.equals(4, vc_calls[2].line1)
+      assert.equals(8, vc_calls[2].line2)
     end)
   end)
 

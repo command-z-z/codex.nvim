@@ -17,25 +17,25 @@ local function is_connected()
 end
 
 local function flush_mentions()
-  if not is_connected() or #M.state.mention_queue == 0 then
+  if #M.state.mention_queue == 0 then
     return
   end
-  local rpc = M.state.rpc
+  local terminal = require("codex.terminal")
+  if not terminal.send_text then
+    return
+  end
   local now = vim.loop.now()
   local queue = {}
   for _, item in ipairs(M.state.mention_queue) do
     if item.expires_at > now then
-      table.insert(queue, item)
+      table.insert(queue, item.text)
     end
   end
   M.state.mention_queue = {}
 
-  local function send_next(i)
-    if i > #queue then return end
-    rpc:notify("$/codex/mention", { text = queue[i].text })
-    vim.defer_fn(function() send_next(i + 1) end, 25)
+  for _, text in ipairs(queue) do
+    terminal.send_text("@" .. text .. " ")
   end
-  send_next(1)
 end
 
 local function schedule_flush()
@@ -48,20 +48,7 @@ function M.enqueue_mention(text)
     text = text,
     expires_at = vim.loop.now() + timeout,
   })
-  if is_connected() then
-    schedule_flush()
-  else
-    vim.defer_fn(function()
-      local now = vim.loop.now()
-      local fresh = {}
-      for _, item in ipairs(M.state.mention_queue) do
-        if item.expires_at > now then
-          table.insert(fresh, item)
-        end
-      end
-      M.state.mention_queue = fresh
-    end, timeout)
-  end
+  schedule_flush()
 end
 
 local function on_connected(rpc)
@@ -114,7 +101,7 @@ local function create_commands()
     terminal.close()
   end, { desc = "Close Codex panel" })
 
-  vim.api.nvim_create_user_command("CodexAdd", function(args)
+  local add_handler = function(args)
     local parts = {}
     for part in (args.args .. " "):gmatch("([^%s]+)%s*") do
       table.insert(parts, part)
@@ -130,12 +117,21 @@ local function create_commands()
       if parts[3] then text = text .. "-" .. parts[3] end
     end
     M.enqueue_mention(text)
-  end, { nargs = "+", complete = "file", desc = "Add file/range to Codex context" })
+  end
+  vim.api.nvim_create_user_command("CodexAdd", add_handler, { nargs = "+", complete = "file", desc = "Add file/range to Codex context" })
+  vim.api.nvim_create_user_command("Codexadd", add_handler, { nargs = "+", complete = "file", desc = "Alias for CodexAdd" })
 
-  vim.api.nvim_create_user_command("CodexSend", function(args)
-    local visual_commands = require("codex.visual_commands")
-    visual_commands.handle_send(args.line1, args.line2)
-  end, { range = true, desc = "Send selection to Codex" })
+  local visual_commands = require("codex.visual_commands")
+  local send_handler = visual_commands.create_visual_command_wrapper(
+      function(args)
+        visual_commands.handle_send(args.line1, args.line2)
+      end,
+      function(line1, line2, args)
+        visual_commands.handle_send(line1, line2)
+      end
+    )
+  vim.api.nvim_create_user_command("CodexSend", send_handler, { range = true, desc = "Send selection to Codex" })
+  vim.api.nvim_create_user_command("Codexsend", send_handler, { range = true, desc = "Alias for CodexSend" })
 
   vim.api.nvim_create_user_command("CodexDiffAccept", function()
     require("codex.diff").accept_all()
@@ -200,6 +196,7 @@ function M.setup(opts)
   config.validate(M.state.config)
 
   terminal.setup(M.state.config)
+  require("codex.app_server").configure(M.state.config)
   create_commands()
 
   M.state.initialized = true
