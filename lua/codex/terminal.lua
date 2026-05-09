@@ -64,9 +64,9 @@ local function get_opts()
   return active_config and active_config.terminal or {}
 end
 
-function M.open()
+function M.open(cmd_override)
   if not active_provider then return end
-  active_provider.open(get_cmd(), get_opts())
+  active_provider.open(cmd_override or get_cmd(), get_opts())
 end
 
 function M.close()
@@ -74,14 +74,14 @@ function M.close()
   active_provider.close()
 end
 
-function M.simple_toggle()
+function M.simple_toggle(cmd_override)
   if not active_provider then return end
-  active_provider.simple_toggle(get_cmd(), get_opts())
+  active_provider.simple_toggle(cmd_override or get_cmd(), get_opts())
 end
 
-function M.focus_toggle()
+function M.focus_toggle(cmd_override)
   if not active_provider then return end
-  active_provider.focus_toggle(get_cmd(), get_opts())
+  active_provider.focus_toggle(cmd_override or get_cmd(), get_opts())
 end
 
 function M.get_active_terminal_bufnr()
