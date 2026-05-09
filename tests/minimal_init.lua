@@ -1,5 +1,3 @@
-vim.opt.rtp:prepend(vim.fn.getcwd())
-vim.opt.rtp:append(vim.fn.stdpath("data") .. "/lazy/plenary.nvim")
-vim.opt.rtp:append(vim.fn.stdpath("data") .. "/lazy/nui.nvim")
-
-require("codex").setup({})
+-- Minimal test harness for codex.nvim. No plenary dependency.
+-- This file is a busted --helper; it runs before every test file.
+-- LUA_PATH is set by the Makefile so this file can stay simple.

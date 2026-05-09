@@ -1,51 +1,85 @@
 local M = {}
 
 M.defaults = {
-    codex_cmd = "codex",
-    backend = "exec_json",
-    ui = {
-        layout = "right",
-        width = 0.38,
-        border = "rounded",
-        progress = {
-            mode = "compact",
-        },
-        keymaps = {
-            focus_output = "<C-k>",
-            focus_prompt = "<C-j>",
-        },
-    },
-    keymaps = {
-        visual_context = "<leader>aq",
-    },
-    exec = {
-        skip_git_repo_check = true,
-    },
-    chat = {
-        sandbox = "workspace-write",
-    },
-    cli = {
-        terminal = "native",
-        no_alt_screen = false,
-        window = {
-            layout = "center",
-            width = 0.9,
-            height = 0.85,
-            border = "rounded",
-        },
-        keymaps = {
-            normal_close = "q",
-            terminal_close = false,
-            terminal_escape = false,
-        },
-    },
+  port_range = { min = 10000, max = 65535 },
+  auto_start = true,
+  codex_cmd = "codex",
+  env = {},
+  log_level = "info",
+  track_selection = true,
+  visual_demotion_delay_ms = 50,
+  focus_after_send = false,
+  connection_wait_delay = 600,
+  connection_timeout = 10000,
+  queue_timeout = 5000,
+  diff_opts = {
+    layout = "vertical",
+    open_in_new_tab = false,
+    keep_terminal_focus = false,
+    on_new_file_reject = "keep_empty",
+    hunk_level_review = true,
+  },
+  terminal = {
+    provider = "auto",
+    split_side = "right",
+    split_width_percentage = 0.30,
+    snacks_win_opts = {},
+    auto_close = true,
+    cwd_provider = nil,
+    git_repo_cwd = true,
+    provider_opts = { external_terminal_cmd = nil },
+  },
+  approval = {
+    policy = "prompt",
+    sandbox = "workspace-write",
+  },
+  models = {},
 }
 
-M.options = vim.deepcopy(M.defaults)
+local function deep_copy(t)
+  local c = {}
+  for k, v in pairs(t) do
+    c[k] = type(v) == "table" and deep_copy(v) or v
+  end
+  return c
+end
 
-function M.setup(opts)
-    M.options = vim.tbl_deep_extend("force", vim.deepcopy(M.defaults), opts or {})
-    return M.options
+local function deep_merge(base, override)
+  local result = deep_copy(base)
+  for k, v in pairs(override) do
+    if type(v) == "table" and type(result[k]) == "table" then
+      result[k] = deep_merge(result[k], v)
+    else
+      result[k] = v
+    end
+  end
+  return result
+end
+
+function M.apply(user_config)
+  return deep_merge(M.defaults, user_config or {})
+end
+
+local VALID_PROVIDERS = { auto = true, snacks = true, native = true, external = true, none = true }
+local VALID_POLICIES  = { prompt = true, ["auto-deny"] = true, ["auto-allow"] = true }
+
+function M.validate(cfg)
+  if type(cfg) ~= "table" then
+    error("validate: cfg must be a table, got " .. type(cfg))
+  end
+  if cfg.codex_cmd ~= nil and type(cfg.codex_cmd) ~= "string" then
+    error("codex_cmd must be a string, got " .. type(cfg.codex_cmd))
+  end
+  if cfg.terminal and cfg.terminal.provider ~= nil then
+    if not VALID_PROVIDERS[cfg.terminal.provider] then
+      error("terminal.provider must be one of: auto, snacks, native, external, none. Got: " .. tostring(cfg.terminal.provider))
+    end
+  end
+  if cfg.approval and cfg.approval.policy ~= nil then
+    if not VALID_POLICIES[cfg.approval.policy] then
+      error("approval.policy must be one of: prompt, auto-deny, auto-allow. Got: " .. tostring(cfg.approval.policy))
+    end
+  end
 end
 
 return M
