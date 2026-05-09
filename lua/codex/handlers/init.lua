@@ -16,6 +16,10 @@ function M.handle_notification(method, params)
   end
 end
 
+function M.has_handler(method)
+  return _handlers[method] ~= nil
+end
+
 function M.handle_request(method, params, respond)
   local h = _handlers[method]
   if h and h.on_request then

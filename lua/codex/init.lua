@@ -77,20 +77,14 @@ end
 
 local function start_server()
   local app_server = require("codex.app_server")
-  local rpc_mod = require("codex.rpc")
   local handlers = require("codex.handlers.init")
   handlers.setup()
 
-  app_server.ensure(function()
-    local url = app_server.url()
-    local rpc = rpc_mod.connect(url, {
-      on_notification = function(method, params)
-        handlers.handle_notification(method, params)
-      end,
-      on_request = function(method, params, respond)
-        handlers.handle_request(method, params, respond)
-      end,
-    })
+  app_server.ensure(function(rpc, err)
+    if err or not rpc then
+      vim.notify("codex: failed to connect — " .. tostring(err), vim.log.levels.ERROR)
+      return
+    end
     on_connected(rpc)
   end)
 end

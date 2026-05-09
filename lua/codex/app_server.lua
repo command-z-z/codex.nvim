@@ -158,8 +158,17 @@ local function connect_when_ready(deadline_ms)
         end,
         on_notification = function(method, params)
             M._handle_notification(method, params)
+            local ok, h = pcall(require, "codex.handlers.init")
+            if ok then h.handle_notification(method, params) end
         end,
-        on_request = ensure_respond_to_server_request,
+        on_request = function(method, params, respond)
+            local ok, h = pcall(require, "codex.handlers.init")
+            if ok and h.has_handler(method) then
+                h.handle_request(method, params, respond)
+            else
+                ensure_respond_to_server_request(method, params, respond)
+            end
+        end,
     })
 
     if not rpc then
