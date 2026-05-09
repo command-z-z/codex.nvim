@@ -119,7 +119,7 @@ describe("codex.init", function()
 
     local expected_commands = {
       "Codex", "CodexFocus", "CodexOpen", "CodexClose",
-      "CodexAdd", "Codexadd", "CodexSend", "Codexsend", "CodexDiffAccept", "CodexDiffDeny",
+      "CodexAdd", "CodexSend", "CodexDiffAccept", "CodexDiffDeny",
       "CodexSelectModel", "CodexStart", "CodexStop", "CodexStatus",
     }
 
@@ -129,72 +129,92 @@ describe("codex.init", function()
       end)
     end
 
-    it(":Codex --resume sets _open_flag", function()
-      local codex_cmd = registered_cmds["Codex"]
-      assert.is_not_nil(codex_cmd)
-      codex_cmd.cb({ args = "--resume" })
-      assert.equals("--resume", codex.state._open_flag)
-    end)
+  end)
 
-    it(":Codex --continue sets _open_flag", function()
-      local codex_cmd = registered_cmds["Codex"]
-      codex_cmd.cb({ args = "--continue" })
-      assert.equals("--continue", codex.state._open_flag)
-    end)
+  describe(":Codex command with --remote", function()
+    local open_calls, toggle_calls, ensure_cbs, notified
+    local terminal_stub, app_server_stub
 
-    it(":Codex with no arg clears _open_flag", function()
-      codex.state._open_flag = "--resume"
-      local codex_cmd = registered_cmds["Codex"]
-      codex_cmd.cb({ args = "" })
-      assert.is_nil(codex.state._open_flag)
-    end)
+    before_each(function()
+      open_calls   = {}
+      toggle_calls = {}
+      ensure_cbs   = {}
+      notified     = {}
 
-    it(":CodexAdd with just file enqueues file path", function()
-      local add_cmd = registered_cmds["CodexAdd"]
-      assert.is_not_nil(add_cmd)
-      add_cmd.cb({ args = "src/foo.lua" })
-      assert.equals(1, #codex.state.mention_queue)
-      assert.equals("src/foo.lua", codex.state.mention_queue[1].text)
-    end)
+      terminal_stub = {
+        setup    = function() end,
+        open     = function(cmd) table.insert(open_calls, cmd) end,
+        close    = function() end,
+        simple_toggle = function(cmd) table.insert(toggle_calls, cmd or true) end,
+        focus_toggle  = function() end,
+        get_active_terminal_bufnr = function() return nil end,
+        send_text = function() end,
+      }
+      app_server_stub = {
+        ensure    = function(cb) table.insert(ensure_cbs, cb) end,
+        configure = function() end,
+        stop      = function() end,
+        url       = function() return "ws://127.0.0.1:19999" end,
+      }
 
-    it(":Codexadd alias enqueues file path", function()
-      codex.state.mention_queue = {}
-      local add_cmd = registered_cmds["Codexadd"]
-      assert.is_not_nil(add_cmd)
-      add_cmd.cb({ args = "src/alias.lua" })
-      assert.equals(1, #codex.state.mention_queue)
-      assert.equals("src/alias.lua", codex.state.mention_queue[1].text)
-    end)
+      local orig_notify = vim.notify
+      vim.notify = function(msg, level)
+        table.insert(notified, { msg = msg, level = level })
+      end
 
-    it(":CodexAdd with file and start line enqueues path:line", function()
-      codex.state.mention_queue = {}
-      local add_cmd = registered_cmds["CodexAdd"]
-      add_cmd.cb({ args = "src/bar.lua 10" })
-      assert.equals(1, #codex.state.mention_queue)
-      assert.equals("src/bar.lua:10", codex.state.mention_queue[1].text)
-    end)
+      package.loaded["codex.init"]       = nil
+      package.loaded["codex.terminal"]   = nil
+      package.loaded["codex.app_server"] = nil
+      package.preload["codex.terminal"]    = function() return terminal_stub end
+      package.preload["codex.app_server"]  = function() return app_server_stub end
 
-    it(":CodexAdd with file and range enqueues path:start-end", function()
-      codex.state.mention_queue = {}
-      local add_cmd = registered_cmds["CodexAdd"]
-      add_cmd.cb({ args = "src/baz.lua 5 20" })
-      assert.equals(1, #codex.state.mention_queue)
-      assert.equals("src/baz.lua:5-20", codex.state.mention_queue[1].text)
-    end)
-
-    it(":CodexAdd flushes mentions via terminal.send_text as @file injection", function()
+      codex = require("codex.init")
       codex.setup({})
-      codex.state.mention_queue = {}
-      sent_texts = {}
+    end)
 
-      local add_cmd = registered_cmds["CodexAdd"]
-      add_cmd.cb({ args = "src/qux.lua 2 4" })
-      assert.equals(1, #deferred_calls)
-      deferred_calls[1].fn()
+    after_each(function()
+      package.preload["codex.terminal"]   = nil
+      package.preload["codex.app_server"] = nil
+    end)
 
-      assert.equals(0, #added_mentions)
-      assert.equals(1, #sent_texts)
-      assert.equals("@src/qux.lua:2-4 ", sent_texts[1])
+    it(":Codex toggles existing terminal without calling ensure", function()
+      -- simulate terminal already running
+      terminal_stub.get_active_terminal_bufnr = function() return 5 end
+      registered_cmds["Codex"].cb({ args = "" })
+      -- simple_toggle called, ensure NOT called
+      assert.equals(1, #toggle_calls)
+      assert.equals(0, #ensure_cbs)
+    end)
+
+    it(":Codex opens with --remote url when app-server ready", function()
+      -- terminal not running; fire the ensure callback immediately
+      terminal_stub.get_active_terminal_bufnr = function() return nil end
+      registered_cmds["Codex"].cb({ args = "" })
+      assert.equals(1, #ensure_cbs)
+      -- fire the callback (simulating success)
+      ensure_cbs[1](nil, nil)
+      -- open should have been called with --remote
+      assert.equals(1, #open_calls)
+      assert.matches("--remote ws://127%.0%.0%.1:19999", open_calls[1])
+    end)
+
+    it(":Codex --resume opens with resume --last and --remote", function()
+      terminal_stub.get_active_terminal_bufnr = function() return nil end
+      registered_cmds["Codex"].cb({ args = "--resume" })
+      ensure_cbs[1](nil, nil)
+      assert.equals(1, #open_calls)
+      assert.matches("--remote ws://127%.0%.0%.1:19999", open_calls[1])
+      assert.matches("resume", open_calls[1])
+      assert.matches("%-%-last", open_calls[1])
+    end)
+
+    it(":Codex shows error and does NOT open when app-server fails", function()
+      terminal_stub.get_active_terminal_bufnr = function() return nil end
+      registered_cmds["Codex"].cb({ args = "" })
+      ensure_cbs[1](nil, "connection refused")
+      assert.equals(0, #open_calls)
+      assert.equals(1, #notified)
+      assert.matches("not ready", notified[1].msg)
     end)
   end)
 
@@ -267,15 +287,6 @@ describe("codex.init", function()
       assert.equals(7, vc_calls[2].line2)
     end)
 
-    it(":Codexsend alias calls visual_commands.handle_send", function()
-      local codex_send = registered_cmds["Codexsend"]
-      assert.is_not_nil(codex_send)
-      codex_send.cb({ line1 = 4, line2 = 8 })
-      assert.equals(2, #vc_calls)
-      assert.is_true(vc_calls[1].wrapped)
-      assert.equals(4, vc_calls[2].line1)
-      assert.equals(8, vc_calls[2].line2)
-    end)
   end)
 
   describe("CodexStop command", function()

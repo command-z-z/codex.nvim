@@ -16,6 +16,17 @@ local function is_connected()
   return M.state.rpc ~= nil
 end
 
+local function build_codex_cmd(flag)
+  local base = (M.state.config and M.state.config.codex_cmd) or "codex"
+  local url = require("codex.app_server").url()
+  if not url then return nil end
+  local remote = " --remote " .. url
+  if flag == "--resume" or flag == "--continue" then
+    return base .. remote .. " resume --last"
+  end
+  return base .. remote
+end
+
 local function flush_mentions()
   if #M.state.mention_queue == 0 then
     return
@@ -41,8 +52,13 @@ local function flush_mentions()
   if terminal.get_active_terminal_bufnr() then
     send_all()
   else
-    terminal.open()
-    -- codex needs time to start and show its prompt
+    local url = require("codex.app_server").url()
+    if not url then
+      vim.notify("codex: app-server not ready — cannot open terminal for mention", vim.log.levels.WARN)
+      return
+    end
+    local base = (M.state.config and M.state.config.codex_cmd) or "codex"
+    terminal.open(base .. " --remote " .. url)
     vim.defer_fn(send_all, 1500)
   end
 end
@@ -90,12 +106,20 @@ local function create_commands()
 
   vim.api.nvim_create_user_command("Codex", function(args)
     local arg = (args.args or ""):match("^%s*(.-)%s*$")
-    if arg == "--resume" or arg == "--continue" then
-      M.state._open_flag = arg
-    else
-      M.state._open_flag = nil
+    if terminal.get_active_terminal_bufnr() then
+      terminal.simple_toggle()
+      return
     end
-    terminal.simple_toggle()
+    local app_server = require("codex.app_server")
+    app_server.ensure(function(_, err)
+      if err then
+        vim.notify("codex: app-server not ready — " .. tostring(err), vim.log.levels.ERROR)
+        return
+      end
+      vim.schedule(function()
+        terminal.open(build_codex_cmd(arg))
+      end)
+    end)
   end, { nargs = "?", desc = "Toggle Codex panel" })
 
   vim.api.nvim_create_user_command("CodexFocus", function()
