@@ -62,13 +62,13 @@ require("codex").setup({
   connection_timeout     = 10000,       -- ms total connection timeout
   queue_timeout          = 5000,        -- ms mention queue item TTL
 
-  -- Diff viewer
+  -- Diff viewer (TODO: limited by the current upstream Codex app-server API)
   diff_opts = {
-    layout              = "vertical",   -- "vertical"|"horizontal"
+    layout              = "vertical",   -- "vertical"|"horizontal"|"diffsplit"
     open_in_new_tab     = false,
     keep_terminal_focus = false,
     on_new_file_reject  = "keep_empty",
-    hunk_level_review   = true,         -- mark hunks while reviewing; final approval is whole patch
+    hunk_level_review   = true,
   },
 
   -- Terminal
@@ -86,7 +86,10 @@ require("codex").setup({
   -- Approval (codex-specific)
   approval = {
     policy   = "prompt",              -- "prompt"|"auto-deny"|"auto-allow"
-    sandbox  = "workspace-write",
+    sandbox  = "read-only",           -- "read-only"|"workspace-write"|"danger-full-access"
+    -- read-only (default): Codex must ask before writes.
+    -- workspace-write: codex's "Auto preset" allows in-workspace writes.
+    -- danger-full-access: no sandbox at all; do not use unless you know why.
   },
 
   -- Model list for CodexSelectModel
@@ -108,26 +111,14 @@ require("codex").setup({
 | `:CodexClose` | Close panel |
 | `:CodexAdd` | Add current buffer to Codex context |
 | `:CodexSend` | Send visual selection to Codex (use `:'<,'>CodexSend` in visual mode) |
-| `:CodexDiffAccept` | Accept pending diff |
-| `:CodexDiffDeny` | Deny pending diff |
+| `:CodexDiffAccept` | TODO: accept pending CodexDiff once the upstream app-server API exposes stable file-change approval data |
+| `:CodexDiffDeny` | TODO: deny pending CodexDiff once the upstream app-server API exposes stable file-change approval data |
+| `:CodexDiffAcceptAll` | TODO: batch accept pending CodexDiff once upstream support is stable |
+| `:CodexDiffDenyAll` | TODO: batch deny pending CodexDiff once upstream support is stable |
 | `:CodexSelectModel` | Pick from configured models |
 | `:CodexStart` | Start app-server manually |
 | `:CodexStop` | Stop app-server |
 | `:CodexStatus` | Show connection status |
-
-### Diff buffer keymaps (active when a diff is shown)
-
-Diff opens automatically when Codex sends an `applyPatchApproval` request through the app-server connection.
-Final approval is whole-patch: use hunk markers while reviewing, then accept or reject the pending patch.
-
-| Key | Action |
-|-----|--------|
-| `a` | Mark hunk at cursor accepted |
-| `r` | Mark hunk at cursor rejected |
-| `A` / `<CR>` | Accept all hunks |
-| `R` / `q` | Reject all hunks |
-| `n` | Next hunk |
-| `p` | Previous hunk |
 
 ## Migration from old codex.nvim
 
@@ -136,8 +127,8 @@ Final approval is whole-patch: use hunk markers while reviewing, then accept or 
 | `:CodexCLI` / `:CodexCLIToggle` | `:Codex` |
 | `:CodexToggle` | `:Codex` |
 | `:CodexResume` | `:Codex --resume` |
-| `:CodexDiff` / `:CodexDiffToggle` | Diff opens automatically from app-server approval requests; use `:CodexDiffAccept`/`:CodexDiffDeny` |
-| `:CodexApply` | `:CodexDiffAccept` |
+| `:CodexDiff` / `:CodexDiffToggle` | TODO: CodexDiff is blocked on stable upstream app-server diff approval support |
+| `:CodexApply` | TODO: use CodexDiff approval commands after upstream support stabilizes |
 
 ## License
 

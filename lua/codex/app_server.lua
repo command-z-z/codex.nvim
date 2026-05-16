@@ -8,7 +8,7 @@ local default_opts = {
     startup_timeout_ms = 5000,
     request_timeout_ms = 120000,
     approval_policy = "on-request",
-    sandbox = "workspace-write",
+    sandbox = "read-only",
   },
 }
 

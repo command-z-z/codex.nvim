@@ -23,7 +23,7 @@ describe("codex.visual_commands", function()
       return { 0, 0, 0, 0 }
     end
 
-    package.preload["codex.init"] = function()
+    package.preload["codex"] = function()
       return {
         enqueue_mention = function(text)
           table.insert(mention_calls, text)
@@ -35,7 +35,7 @@ describe("codex.visual_commands", function()
   end)
 
   after_each(function()
-    package.preload["codex.init"] = nil
+    package.preload["codex"] = nil
   end)
 
   -- ── validate_visual_mode ─────────────────────────────────────────

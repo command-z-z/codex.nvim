@@ -6,8 +6,8 @@ describe("codex.handlers.approval", function()
 
   local function load_with_policy(policy)
     package.loaded["codex.handlers.approval"] = nil
-    package.loaded["codex.init"] = nil
-    package.preload["codex.init"] = function()
+    package.loaded["codex"] = nil
+    package.preload["codex"] = function()
       return { state = { config = { approval = { policy = policy } } } }
     end
     return require("codex.handlers.approval")
@@ -19,8 +19,8 @@ describe("codex.handlers.approval", function()
   end)
 
   after_each(function()
-    package.preload["codex.init"] = nil
-    package.loaded["codex.init"] = nil
+    package.preload["codex"] = nil
+    package.loaded["codex"] = nil
     package.loaded["codex.handlers.approval"] = nil
   end)
 
@@ -80,8 +80,8 @@ describe("codex.handlers.approval", function()
     end)
     it("returns 'prompt' when codex.init is unavailable", function()
       package.loaded["codex.handlers.approval"] = nil
-      package.loaded["codex.init"] = nil
-      package.preload["codex.init"] = nil
+      package.loaded["codex"] = nil
+      package.preload["codex"] = nil
       approval = require("codex.handlers.approval")
       assert.equals("prompt", approval._get_policy())
     end)

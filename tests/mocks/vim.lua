@@ -117,6 +117,21 @@ local vim = {
       return 1
     end,
 
+    nvim_buf_set_var = function(bufnr, name, value)
+      local b = vim._buffers[bufnr]
+      if not b then return end
+      b.vars = b.vars or {}
+      b.vars[name] = value
+    end,
+
+    nvim_buf_get_var = function(bufnr, name)
+      local b = vim._buffers[bufnr]
+      if b and b.vars and b.vars[name] ~= nil then
+        return b.vars[name]
+      end
+      error("Key not found: " .. tostring(name))
+    end,
+
     nvim_buf_get_name = function(bufnr)
       return vim._buffers[bufnr] and vim._buffers[bufnr].name or ""
     end,
@@ -145,8 +160,9 @@ local vim = {
       if not vim._buffers[bufnr] then
         return nil
       end
-
-      return vim._buffers[bufnr].options and vim._buffers[bufnr].options[name] or nil
+      local opts = vim._buffers[bufnr].options
+      if not opts then return nil end
+      return opts[name]
     end,
 
     nvim_buf_delete = function(bufnr, opts)
@@ -1009,6 +1025,23 @@ vim._mock = {
     }
   end,
 
+  -- Fire all autocmds matching the given event name (across all groups).
+  -- Helper for tests that need to trigger TabClosed/BufWritePost/etc.
+  fire_autocmd = function(event, ctx)
+    ctx = ctx or {}
+    for _, group in pairs(vim._autocmds or {}) do
+      for _, entry in pairs(group.events or {}) do
+        local evs = entry.events
+        if type(evs) == "string" then evs = { evs } end
+        for _, e in ipairs(evs or {}) do
+          if e == event and entry.opts and entry.opts.callback then
+            entry.opts.callback(ctx)
+          end
+        end
+      end
+    end
+  end,
+
   reset = function()
     vim._buffers = {}
     vim._windows = {}
@@ -1045,5 +1078,17 @@ vim.o = setmetatable({ columns = 120, lines = 40 }, {
 })
 
 vim.uv = vim.loop
+
+vim.filetype = vim.filetype or {
+  match = function(args)
+    args = args or {}
+    local name = args.filename or ""
+    if name:match("%.lua$") then return "lua" end
+    if name:match("%.md$")  then return "markdown" end
+    if name:match("%.py$")  then return "python" end
+    if name:match("%.json$") then return "json" end
+    return ""
+  end,
+}
 
 return vim

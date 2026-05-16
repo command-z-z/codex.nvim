@@ -149,7 +149,7 @@ local function deny_result(method)
 end
 
 local function approval_policy()
-  local init = require("codex.init")
+  local init = require("codex")
   return init.state.config
     and init.state.config.approval
     and init.state.config.approval.policy
@@ -157,7 +157,7 @@ local function approval_policy()
 end
 
 local function diff_opts()
-  local init = require("codex.init")
+  local init = require("codex")
   return (init.state.config and init.state.config.diff_opts) or {}
 end
 

@@ -18,8 +18,16 @@ describe("codex.handlers", function()
       end,
     }
     package.preload["codex.diff"] = function() return diff_mock end
-    package.preload["codex.init"] = function()
-      return { state = { config = { diff_opts = { layout = "vertical" }, approval = { policy = approval_policy } } } }
+    -- Dynamic mock so reads of `.state` reflect the current approval_policy
+    -- after a test reassigns the upvalue.
+    package.preload["codex"] = function()
+      return setmetatable({}, {
+        __index = function(_, k)
+          if k == "state" then
+            return { config = { diff_opts = { layout = "vertical" }, approval = { policy = approval_policy } } }
+          end
+        end,
+      })
     end
 
     handlers = require("codex.handlers.init")
@@ -27,9 +35,9 @@ describe("codex.handlers", function()
 
   after_each(function()
     package.preload["codex.diff"] = nil
-    package.preload["codex.init"] = nil
+    package.preload["codex"] = nil
     package.loaded["codex.diff"] = nil
-    package.loaded["codex.init"] = nil
+    package.loaded["codex"] = nil
   end)
 
   -- ── handlers/init.lua — dispatcher ────────────────────────────
@@ -159,6 +167,18 @@ describe("codex.handlers", function()
       diff_apply.on_request({ patch = "p" }, function(r) result = r end, "item/fileChange/requestApproval")
       assert.equals(0, #diff_mock.open_calls)
       assert.same({ decision = "decline" }, result)
+    end)
+
+    it("on_request opens diff when policy=prompt + valid patch (Phase 8 sanity)", function()
+      approval_policy = "prompt"
+      diff_apply.on_request(
+        { patch = "diff --git a/x b/x\n@@ -1 +1 @@\n-a\n+b\n" },
+        function() end,
+        "item/fileChange/requestApproval"
+      )
+      assert.equals(1, #diff_mock.open_calls)
+      -- The wrapper for fileChange method gets passed instead of raw respond
+      assert.is_truthy(diff_mock.open_calls[1].respond_fn)
     end)
 
     it("on_request passes diff_opts from config", function()

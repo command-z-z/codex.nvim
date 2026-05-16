@@ -19,7 +19,7 @@ end
 -- ── Parser ────────────────────────────────────────────────────────
 
 local function new_file()
-  return { header = {}, hunks = {}, binary = false }
+  return { header = {}, hunks = {}, binary = false, path = "", kind = "modify" }
 end
 
 function M.parse(patch)
@@ -28,14 +28,22 @@ function M.parse(patch)
   for _, line in ipairs(split_lines(patch or "")) do
     if starts_with(line, "diff --git ") then
       current = new_file()
+      current.path = line:match("^diff %-%-git a/(.-) b/") or ""
       current.header[#current.header + 1] = line
       files[#files + 1] = current
       current_hunk = nil
     elseif current and starts_with(line, "@@") then
       current_hunk = { header = line, lines = {}, accepted = true }
       current.hunks[#current.hunks + 1] = current_hunk
+    elseif current and starts_with(line, "new file mode") then
+      current.kind = "new"
+      current.header[#current.header + 1] = line
+    elseif current and starts_with(line, "deleted file mode") then
+      current.kind = "delete"
+      current.header[#current.header + 1] = line
     elseif current and (starts_with(line, "Binary files ") or starts_with(line, "GIT binary patch")) then
       current.binary = true
+      current.kind = "binary"
       current.header[#current.header + 1] = line
       current_hunk = nil
     elseif current_hunk then
@@ -114,13 +122,25 @@ function M.open(patch, respond_fn, opts)
     hunk_map = {},
     hunk_starts = {},
     config = opts,
+    layout = opts.layout,
   }
-  M._open_ui()
+  if opts.layout == "diffsplit" then
+    M._open_ui_diffsplit()
+  else
+    M._open_ui()
+  end
 end
 
 function M.accept_all()
   local p = M.state.pending
   if not p then return end
+  if p.layout == "diffsplit" then
+    for _, f in ipairs(p.files) do
+      if f.status == "pending" then f.status = "accepted" end
+    end
+    M._finalize_diffsplit()
+    return
+  end
   for i = 1, #p.files do
     M.set_accepted(p.files, i, nil, true)
   end
@@ -133,10 +153,41 @@ end
 function M.deny_all()
   local p = M.state.pending
   if not p then return end
+  if p.layout == "diffsplit" then
+    for _, f in ipairs(p.files) do
+      if f.status == "pending" then f.status = "denied" end
+    end
+    M._finalize_diffsplit()
+    return
+  end
   local respond_fn = p.respond_fn
   M._close_windows()
   M.state.pending = nil
   if respond_fn then respond_fn({ decision = "denied" }, nil) end
+end
+
+function M.accept_current()
+  local p = M.state.pending
+  if not p then return end
+  if p.layout ~= "diffsplit" then return M.accept_all() end
+  local idx = M._current_file_idx()
+  if not idx then return end
+  local f = p.files[idx]
+  if f.status ~= "pending" then return end
+  f.status = "accepted"
+  M._jump_next_pending_or_finalize()
+end
+
+function M.deny_current()
+  local p = M.state.pending
+  if not p then return end
+  if p.layout ~= "diffsplit" then return M.deny_all() end
+  local idx = M._current_file_idx()
+  if not idx then return end
+  local f = p.files[idx]
+  if f.status ~= "pending" then return end
+  f.status = "denied"
+  M._jump_next_pending_or_finalize()
 end
 
 function M.accept_hunk(file_idx, hunk_idx)
@@ -308,12 +359,193 @@ end
 function M._close_windows()
   local p = M.state.pending
   if not p then return end
+  if p.layout == "diffsplit" then
+    M._close_all_diffsplit_tabs()
+    return
+  end
   if p.win and vim.api.nvim_win_is_valid(p.win) then
     vim.api.nvim_win_close(p.win, true)
   end
   if p.buf and vim.api.nvim_buf_is_valid(p.buf) then
     pcall(vim.api.nvim_buf_delete, p.buf, { force = true })
   end
+end
+
+-- ── Phase 7: diffsplit layout ─────────────────────────────────────
+
+function M._open_ui_diffsplit()
+  local p = M.state.pending
+  if not p then return end
+  local diff_patch = require("codex.diff_patch")
+  local cwd = vim.fn.getcwd()
+
+  -- Pre-compute new_lines for every file. If any fails (corrupt patch,
+  -- missing file, context mismatch) revert the whole session to the
+  -- unified UI instead of leaving half-set tabs.
+  for _, f in ipairs(p.files) do
+    local abs = vim.fn.fnamemodify(cwd .. "/" .. (f.path or ""), ":p")
+    local new_lines, ok, err = diff_patch.compute_new_lines(f, abs)
+    if not ok then
+      vim.notify(
+        ("codex: %s — falling back to unified diff"):format(err or "patch error"),
+        vim.log.levels.WARN
+      )
+      p.layout = "vertical"
+      p.config = p.config or {}
+      p.config.layout = "vertical"
+      M._open_ui()
+      return
+    end
+    f.new_lines = new_lines
+    f.status    = "pending"
+  end
+
+  for i, f in ipairs(p.files) do
+    M._open_file_tab(i, f, cwd)
+  end
+  if p.files[1] and p.files[1].tab_id then
+    vim.api.nvim_set_current_tabpage(p.files[1].tab_id)
+  end
+
+  -- Mark a tab as denied if the user closes it before deciding.
+  local group = vim.api.nvim_create_augroup("codex.diff.diffsplit", { clear = true })
+  vim.api.nvim_create_autocmd("TabClosed", {
+    group = group,
+    callback = function()
+      local cur = M.state.pending
+      if not cur or cur.layout ~= "diffsplit" then return end
+      local changed = false
+      for _, file in ipairs(cur.files) do
+        if file.status == "pending"
+           and file.tab_id
+           and not vim.api.nvim_tabpage_is_valid(file.tab_id) then
+          file.status = "denied"
+          changed = true
+        end
+      end
+      if changed then M._jump_next_pending_or_finalize() end
+    end,
+  })
+end
+
+function M._open_file_tab(file_idx, f, cwd)
+  vim.cmd("tabnew")
+  f.tab_id = vim.api.nvim_get_current_tabpage()
+
+  -- Left window: original file (empty scratch for kind="new")
+  if f.kind == "new" then
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(buf, (f.path or "") .. " (new file)")
+    vim.api.nvim_buf_set_option(buf, "buftype", "nofile")
+    vim.api.nvim_buf_set_option(buf, "modifiable", false)
+    vim.api.nvim_win_set_buf(vim.api.nvim_get_current_win(), buf)
+    f.orig_buf = buf
+  else
+    local abs = vim.fn.fnamemodify(cwd .. "/" .. (f.path or ""), ":p")
+    vim.cmd("edit " .. vim.fn.fnameescape(abs))
+    f.orig_buf = vim.api.nvim_get_current_buf()
+  end
+  f.orig_win = vim.api.nvim_get_current_win()
+  vim.cmd("diffthis")
+
+  -- Right window: scratch new content (read-only)
+  vim.cmd("vsplit")
+  local new_buf = vim.api.nvim_create_buf(false, true)
+  local suffix = f.kind == "delete" and " (deleted)" or " (codex proposed)"
+  vim.api.nvim_buf_set_name(new_buf, (f.path or "") .. suffix)
+  vim.api.nvim_buf_set_lines(new_buf, 0, -1, false, f.new_lines or {})
+  vim.api.nvim_buf_set_option(new_buf, "buftype", "nofile")
+  vim.api.nvim_buf_set_option(new_buf, "bufhidden", "wipe")
+  vim.api.nvim_buf_set_option(new_buf, "modifiable", false)
+  local ft = (vim.filetype and vim.filetype.match
+              and vim.filetype.match({ filename = f.path or "" })) or ""
+  if ft ~= "" then
+    vim.api.nvim_buf_set_option(new_buf, "filetype", ft)
+  end
+  vim.api.nvim_win_set_buf(vim.api.nvim_get_current_win(), new_buf)
+  f.new_buf = new_buf
+  f.new_win = vim.api.nvim_get_current_win()
+  vim.cmd("diffthis")
+
+  vim.api.nvim_buf_set_var(f.orig_buf, "codex_diff_file_idx", file_idx)
+  vim.api.nvim_buf_set_var(new_buf,    "codex_diff_file_idx", file_idx)
+end
+
+function M._current_file_idx()
+  local p = M.state.pending
+  if not p then return nil end
+  local cur_tab = vim.api.nvim_get_current_tabpage()
+  for i, f in ipairs(p.files) do
+    if f.tab_id == cur_tab then return i end
+  end
+  return nil
+end
+
+function M._jump_next_pending_or_finalize()
+  local p = M.state.pending
+  if not p then return end
+  for _, f in ipairs(p.files) do
+    if f.status == "pending" then
+      if f.tab_id and vim.api.nvim_tabpage_is_valid(f.tab_id) then
+        pcall(vim.api.nvim_set_current_tabpage, f.tab_id)
+      end
+      return
+    end
+  end
+  M._finalize_diffsplit()
+end
+
+function M._finalize_diffsplit()
+  local p = M.state.pending
+  if not p then return end
+  local respond_fn = p.respond_fn
+  local has_accepted = false
+  for _, f in ipairs(p.files) do
+    if f.status == "accepted" then has_accepted = true; break end
+  end
+  M._close_all_diffsplit_tabs()
+  M.state.pending = nil
+  if respond_fn then
+    -- Same response shape as accept_all/deny_all in unified mode.
+    -- See plan/Context: server applies the original patch on "approved";
+    -- partial deny is decorative.
+    if has_accepted then respond_fn({ decision = "approved" }, nil)
+    else respond_fn({ decision = "denied" }, nil) end
+  end
+end
+
+function M._close_all_diffsplit_tabs()
+  local p = M.state.pending
+  if not p then return end
+  -- Clear the TabClosed autocmd first so the cleanup tabclose calls below
+  -- don't recursively trigger denied-mark logic.
+  pcall(vim.api.nvim_clear_autocmds, { group = "codex.diff.diffsplit" })
+  for _, f in ipairs(p.files) do
+    if f.tab_id and vim.api.nvim_tabpage_is_valid(f.tab_id) then
+      pcall(vim.api.nvim_set_current_tabpage, f.tab_id)
+      pcall(vim.cmd, "tabclose")
+    end
+  end
+end
+
+-- Decorative: rebuild patch from accepted files' parsed hunks.
+-- Currently UNUSED — server applies the original patch regardless on
+-- decision="approved". Kept for a future protocol enhancement that forwards
+-- a per-file patch back to app-server.
+function M._reconstruct_patch()
+  local p = M.state.pending
+  if not p then return "" end
+  local out = {}
+  for _, f in ipairs(p.files) do
+    if f.status == "accepted" then
+      for _, h in ipairs(f.header) do out[#out+1] = h end
+      for _, hunk in ipairs(f.hunks) do
+        out[#out+1] = hunk.header
+        for _, l in ipairs(hunk.lines) do out[#out+1] = l end
+      end
+    end
+  end
+  return #out > 0 and (table.concat(out, "\n") .. "\n") or ""
 end
 
 return M

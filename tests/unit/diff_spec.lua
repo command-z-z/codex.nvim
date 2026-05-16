@@ -101,6 +101,84 @@ describe("codex.diff", function()
       local files = diff.parse(patch)
       assert.is_true(files[1].hunks[1].accepted)
     end)
+
+    -- ── Phase 7: path + kind extraction ───────────────────────────
+    it("extracts path from diff --git header", function()
+      local patch = "diff --git a/lua/foo.lua b/lua/foo.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n"
+      local files = diff.parse(patch)
+      assert.equals("lua/foo.lua", files[1].path)
+    end)
+
+    it("handles paths with subdirectories", function()
+      local patch = "diff --git a/lua/codex/diff.lua b/lua/codex/diff.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n"
+      local files = diff.parse(patch)
+      assert.equals("lua/codex/diff.lua", files[1].path)
+    end)
+
+    it("kind defaults to 'modify' for regular changes", function()
+      local patch = "diff --git a/a.lua b/a.lua\n@@ -1,1 +1,1 @@\n-a\n+b\n"
+      local files = diff.parse(patch)
+      assert.equals("modify", files[1].kind)
+    end)
+
+    it("kind='new' for new file mode", function()
+      local patch = table.concat({
+        "diff --git a/new.lua b/new.lua",
+        "new file mode 100644",
+        "--- /dev/null",
+        "+++ b/new.lua",
+        "@@ -0,0 +1,2 @@",
+        "+line1",
+        "+line2",
+      }, "\n")
+      local files = diff.parse(patch)
+      assert.equals("new", files[1].kind)
+      assert.equals("new.lua", files[1].path)
+    end)
+
+    it("kind='delete' for deleted file mode", function()
+      local patch = table.concat({
+        "diff --git a/old.lua b/old.lua",
+        "deleted file mode 100644",
+        "--- a/old.lua",
+        "+++ /dev/null",
+        "@@ -1,2 +0,0 @@",
+        "-line1",
+        "-line2",
+      }, "\n")
+      local files = diff.parse(patch)
+      assert.equals("delete", files[1].kind)
+    end)
+
+    it("kind='binary' for binary files (also sets binary=true)", function()
+      local patch = table.concat({
+        "diff --git a/img.png b/img.png",
+        "Binary files a/img.png and b/img.png differ",
+      }, "\n")
+      local files = diff.parse(patch)
+      assert.equals("binary", files[1].kind)
+      assert.is_true(files[1].binary)
+    end)
+
+    it("multi-file patch records per-file kind/path", function()
+      local patch = table.concat({
+        "diff --git a/a.lua b/a.lua",
+        "@@ -1,1 +1,1 @@",
+        "-x",
+        "+y",
+        "diff --git a/b.lua b/b.lua",
+        "new file mode 100644",
+        "--- /dev/null",
+        "+++ b/b.lua",
+        "@@ -0,0 +1,1 @@",
+        "+hi",
+      }, "\n")
+      local files = diff.parse(patch)
+      assert.equals("a.lua",   files[1].path)
+      assert.equals("modify",  files[1].kind)
+      assert.equals("b.lua",   files[2].path)
+      assert.equals("new",     files[2].kind)
+    end)
   end)
 
   -- ── set_accepted ──────────────────────────────────────────────
@@ -583,6 +661,278 @@ describe("codex.diff", function()
         vim._keymaps["n"]["A"].rhs()
         diff.accept_all = orig
         assert.is_true(accepted)
+      end)
+    end)
+  end)
+
+  -- ── Phase 7: diffsplit layout ────────────────────────────────────
+  describe("diffsplit layout", function()
+    -- Patch source: a single-file modify with simple change.
+    local single_file_patch = table.concat({
+      "diff --git a/foo.lua b/foo.lua",
+      "--- a/foo.lua",
+      "+++ b/foo.lua",
+      "@@ -1,2 +1,2 @@",
+      "-old",
+      " same",
+    }, "\n")
+
+    local tmpdir, foo_path
+
+    before_each(function()
+      -- Stubs for tabline / autocmd helpers not in vim mock
+      _G.vim.api.nvim_win_set_cursor = _G.vim.api.nvim_win_set_cursor or function() end
+      _G.vim.fn.fnamemodify = _G.vim.fn.fnamemodify or function(p) return p end
+      _G.vim.fn.fnameescape = _G.vim.fn.fnameescape or function(p) return p end
+      _G.vim.fn.getcwd      = _G.vim.fn.getcwd      or function() return "/tmp/codex_test" end
+
+      -- Real on-disk file so compute_new_lines can read original_lines
+      tmpdir = "/tmp/codex_diff_test_" .. tostring(math.random(1, 1e9))
+      os.execute("mkdir -p " .. tmpdir)
+      foo_path = tmpdir .. "/foo.lua"
+      local f = io.open(foo_path, "wb"); f:write("old\nsame\n"); f:close()
+      -- Make getcwd return tmpdir so diff.lua resolves a/foo.lua → tmpdir/foo.lua
+      _G.vim.fn.getcwd = function() return tmpdir end
+    end)
+
+    after_each(function()
+      if tmpdir then
+        os.execute("rm -rf " .. tmpdir)
+        tmpdir = nil
+      end
+    end)
+
+    it("M.open with layout='diffsplit' sets pending.layout", function()
+      diff.open(single_file_patch, nil, { layout = "diffsplit" })
+      assert.equals("diffsplit", diff.get_pending().layout)
+    end)
+
+    it("creates a tab and stores tab_id per file", function()
+      diff.open(single_file_patch, nil, { layout = "diffsplit" })
+      local f = diff.get_pending().files[1]
+      assert.is_truthy(f.tab_id)
+    end)
+
+    it("populates new_lines from disk + parsed hunks", function()
+      diff.open(single_file_patch, nil, { layout = "diffsplit" })
+      local f = diff.get_pending().files[1]
+      assert.same({ "same" }, f.new_lines)
+    end)
+
+    it("status starts as 'pending'", function()
+      diff.open(single_file_patch, nil, { layout = "diffsplit" })
+      assert.equals("pending", diff.get_pending().files[1].status)
+    end)
+
+    it("right (new_buf) buffer is read-only", function()
+      diff.open(single_file_patch, nil, { layout = "diffsplit" })
+      local f = diff.get_pending().files[1]
+      assert.equals(false, vim.api.nvim_buf_get_option(f.new_buf, "modifiable"))
+      assert.equals("nofile", vim.api.nvim_buf_get_option(f.new_buf, "buftype"))
+    end)
+
+    it("buf-local var codex_diff_file_idx is set on both buffers", function()
+      diff.open(single_file_patch, nil, { layout = "diffsplit" })
+      local f = diff.get_pending().files[1]
+      assert.equals(1, vim.api.nvim_buf_get_var(f.orig_buf, "codex_diff_file_idx"))
+      assert.equals(1, vim.api.nvim_buf_get_var(f.new_buf,  "codex_diff_file_idx"))
+    end)
+
+    it("multi-file patch creates multiple tabs", function()
+      local bar_path = tmpdir .. "/bar.lua"
+      local f = io.open(bar_path, "wb"); f:write("x\n"); f:close()
+      local multi = single_file_patch .. "\n" .. table.concat({
+        "diff --git a/bar.lua b/bar.lua",
+        "@@ -1,1 +1,1 @@",
+        "-x",
+        "+X",
+      }, "\n")
+      diff.open(multi, nil, { layout = "diffsplit" })
+      local p = diff.get_pending()
+      assert.equals(2, #p.files)
+      assert.is_truthy(p.files[1].tab_id)
+      assert.is_truthy(p.files[2].tab_id)
+      assert.not_equals(p.files[1].tab_id, p.files[2].tab_id)
+    end)
+
+    it("falls back to unified UI when patch context mismatches", function()
+      -- Original "old\nsame\n", but hunk expects "WRONG"
+      local bad = table.concat({
+        "diff --git a/foo.lua b/foo.lua",
+        "@@ -1,2 +1,2 @@",
+        "-WRONG",
+        " same",
+      }, "\n")
+      diff.open(bad, nil, { layout = "diffsplit" })
+      -- After fallback, layout was rewritten to "vertical" and unified UI ran
+      local p = diff.get_pending()
+      assert.equals("vertical", p.layout)
+      -- unified UI uses p.buf / p.win (single window)
+      assert.is_truthy(p.buf)
+    end)
+
+    it("new file kind: left buffer is empty scratch, right has full new content", function()
+      local new_patch = table.concat({
+        "diff --git a/newf.lua b/newf.lua",
+        "new file mode 100644",
+        "--- /dev/null",
+        "+++ b/newf.lua",
+        "@@ -0,0 +1,2 @@",
+        "+hello",
+        "+world",
+      }, "\n")
+      diff.open(new_patch, nil, { layout = "diffsplit" })
+      local f = diff.get_pending().files[1]
+      assert.equals("new", f.kind)
+      assert.same({ "hello", "world" }, f.new_lines)
+    end)
+
+    -- ── state machine: accept/deny per file + finalize ────────────
+    describe("state machine", function()
+      local function multi_patch(bar_path)
+        -- Need bar.lua on disk too
+        local f = io.open(bar_path, "wb"); f:write("x\n"); f:close()
+        return single_file_patch .. "\n" .. table.concat({
+          "diff --git a/bar.lua b/bar.lua",
+          "@@ -1,1 +1,1 @@",
+          "-x",
+          "+X",
+        }, "\n")
+      end
+
+      it("accept_current marks current file accepted", function()
+        diff.open(single_file_patch, nil, { layout = "diffsplit" })
+        local p = diff.get_pending()
+        vim.api.nvim_set_current_tabpage(p.files[1].tab_id)
+        diff.accept_current()
+        -- single-file path: also finalizes (all decided) → pending cleared
+        assert.is_false(diff.has_pending())
+      end)
+
+      it("deny_current marks current file denied + finalize", function()
+        local result
+        diff.open(single_file_patch, function(r) result = r end, { layout = "diffsplit" })
+        local p = diff.get_pending()
+        vim.api.nvim_set_current_tabpage(p.files[1].tab_id)
+        diff.deny_current()
+        assert.equals("denied", result.decision)
+      end)
+
+      it("accept_current responds approved after single file accepted", function()
+        local result
+        diff.open(single_file_patch, function(r) result = r end, { layout = "diffsplit" })
+        local p = diff.get_pending()
+        vim.api.nvim_set_current_tabpage(p.files[1].tab_id)
+        diff.accept_current()
+        assert.equals("approved", result.decision)
+      end)
+
+      it("multi-file: each accept_current moves to next pending tab", function()
+        local bar_path = tmpdir .. "/bar.lua"
+        diff.open(multi_patch(bar_path), nil, { layout = "diffsplit" })
+        local p = diff.get_pending()
+        local tab1, tab2 = p.files[1].tab_id, p.files[2].tab_id
+        vim.api.nvim_set_current_tabpage(tab1)
+        diff.accept_current()
+        -- After accept tab1, should still have pending, current tab should be tab2
+        assert.is_true(diff.has_pending())
+        assert.equals("accepted", diff.get_pending().files[1].status)
+        assert.equals(tab2, vim.api.nvim_get_current_tabpage())
+      end)
+
+      it("multi-file: after all decided, finalize with approved if any accepted", function()
+        local result
+        local bar_path = tmpdir .. "/bar.lua"
+        diff.open(multi_patch(bar_path), function(r) result = r end, { layout = "diffsplit" })
+        local p = diff.get_pending()
+        vim.api.nvim_set_current_tabpage(p.files[1].tab_id)
+        diff.accept_current()
+        vim.api.nvim_set_current_tabpage(p.files[2].tab_id)
+        diff.deny_current()
+        assert.equals("approved", result.decision)
+        assert.is_false(diff.has_pending())
+      end)
+
+      it("multi-file: all denied → respond_fn denied", function()
+        local result
+        local bar_path = tmpdir .. "/bar.lua"
+        diff.open(multi_patch(bar_path), function(r) result = r end, { layout = "diffsplit" })
+        local p = diff.get_pending()
+        vim.api.nvim_set_current_tabpage(p.files[1].tab_id)
+        diff.deny_current()
+        vim.api.nvim_set_current_tabpage(p.files[2].tab_id)
+        diff.deny_current()
+        assert.equals("denied", result.decision)
+      end)
+
+      it("accept_all in diffsplit marks all pending and finalizes approved", function()
+        local result
+        local bar_path = tmpdir .. "/bar.lua"
+        diff.open(multi_patch(bar_path), function(r) result = r end, { layout = "diffsplit" })
+        diff.accept_all()
+        assert.equals("approved", result.decision)
+        assert.is_false(diff.has_pending())
+      end)
+
+      it("deny_all in diffsplit marks all pending and finalizes denied", function()
+        local result
+        local bar_path = tmpdir .. "/bar.lua"
+        diff.open(multi_patch(bar_path), function(r) result = r end, { layout = "diffsplit" })
+        diff.deny_all()
+        assert.equals("denied", result.decision)
+        assert.is_false(diff.has_pending())
+      end)
+
+      it("accept_current in unified mode delegates to accept_all", function()
+        local result
+        diff.open(single_file_patch, function(r) result = r end, {})  -- no layout
+        diff.accept_current()
+        assert.equals("approved", result.decision)
+      end)
+
+      it("deny_current in unified mode delegates to deny_all", function()
+        local result
+        diff.open(single_file_patch, function(r) result = r end, {})
+        diff.deny_current()
+        assert.equals("denied", result.decision)
+      end)
+    end)
+
+    -- ── TabClosed autocmd: user closing a pending tab = deny ──────
+    describe("TabClosed autocmd", function()
+      it("pending tab closed → file marked denied + finalize", function()
+        local result
+        diff.open(single_file_patch, function(r) result = r end, { layout = "diffsplit" })
+        local p = diff.get_pending()
+        local tab_id = p.files[1].tab_id
+        -- Simulate user closing the tab
+        vim.api.nvim_set_current_tabpage(tab_id)
+        vim.cmd("tabclose")
+        -- Then fire TabClosed manually (mock doesn't fire it from tabclose)
+        vim._mock.fire_autocmd("TabClosed", {})
+        assert.is_false(diff.has_pending())
+        assert.equals("denied", result.decision)
+      end)
+
+      it("multi-file: closing one tab denies that file, others remain", function()
+        local bar_path = tmpdir .. "/bar.lua"
+        local f = io.open(bar_path, "wb"); f:write("x\n"); f:close()
+        local multi = single_file_patch .. "\n" .. table.concat({
+          "diff --git a/bar.lua b/bar.lua",
+          "@@ -1,1 +1,1 @@",
+          "-x",
+          "+X",
+        }, "\n")
+        diff.open(multi, nil, { layout = "diffsplit" })
+        local p = diff.get_pending()
+        local tab1 = p.files[1].tab_id
+        vim.api.nvim_set_current_tabpage(tab1)
+        vim.cmd("tabclose")
+        vim._mock.fire_autocmd("TabClosed", {})
+        -- file1 should be denied, file2 still pending
+        assert.is_true(diff.has_pending())
+        assert.equals("denied",  diff.get_pending().files[1].status)
+        assert.equals("pending", diff.get_pending().files[2].status)
       end)
     end)
   end)

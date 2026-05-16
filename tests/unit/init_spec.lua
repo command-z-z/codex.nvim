@@ -124,7 +124,9 @@ describe("codex.init", function()
 
     local expected_commands = {
       "Codex", "CodexFocus", "CodexOpen", "CodexClose",
-      "CodexAdd", "CodexSend", "CodexDiffAccept", "CodexDiffDeny",
+      "CodexAdd", "CodexSend",
+      "CodexDiffAccept", "CodexDiffDeny",
+      "CodexDiffAcceptAll", "CodexDiffDenyAll",
       "CodexSelectModel", "CodexStart", "CodexStop", "CodexStatus",
     }
 
@@ -378,7 +380,11 @@ describe("codex.init", function()
     local diff_mock
 
     before_each(function()
-      diff_mock = { calls = 0, accept_all = function() diff_mock.calls = diff_mock.calls + 1 end }
+      diff_mock = {
+        current_calls = 0, all_calls = 0,
+        accept_current = function() diff_mock.current_calls = diff_mock.current_calls + 1 end,
+        accept_all     = function() diff_mock.all_calls     = diff_mock.all_calls     + 1 end,
+      }
       package.preload["codex.diff"] = function() return diff_mock end
       codex.setup({})
     end)
@@ -388,15 +394,14 @@ describe("codex.init", function()
       package.loaded["codex.diff"] = nil
     end)
 
-    it("calls diff.accept_all()", function()
+    it("calls diff.accept_current() (delegates to all in unified mode)", function()
       local cmd = registered_cmds["CodexDiffAccept"]
       assert.is_not_nil(cmd)
       cmd.cb({})
-      assert.equals(1, diff_mock.calls)
+      assert.equals(1, diff_mock.current_calls)
     end)
 
     it("is safe when no diff is pending (no-op)", function()
-      -- diff_mock.accept_all is already a no-op counter; calling with no pending is fine
       local cmd = registered_cmds["CodexDiffAccept"]
       assert.has_no.errors(function() cmd.cb({}) end)
     end)
@@ -406,7 +411,11 @@ describe("codex.init", function()
     local diff_mock
 
     before_each(function()
-      diff_mock = { calls = 0, deny_all = function() diff_mock.calls = diff_mock.calls + 1 end }
+      diff_mock = {
+        current_calls = 0, all_calls = 0,
+        deny_current = function() diff_mock.current_calls = diff_mock.current_calls + 1 end,
+        deny_all     = function() diff_mock.all_calls     = diff_mock.all_calls     + 1 end,
+      }
       package.preload["codex.diff"] = function() return diff_mock end
       codex.setup({})
     end)
@@ -416,16 +425,87 @@ describe("codex.init", function()
       package.loaded["codex.diff"] = nil
     end)
 
-    it("calls diff.deny_all()", function()
+    it("calls diff.deny_current() (delegates to all in unified mode)", function()
       local cmd = registered_cmds["CodexDiffDeny"]
       assert.is_not_nil(cmd)
       cmd.cb({})
-      assert.equals(1, diff_mock.calls)
+      assert.equals(1, diff_mock.current_calls)
     end)
 
     it("is safe when no diff is pending (no-op)", function()
       local cmd = registered_cmds["CodexDiffDeny"]
       assert.has_no.errors(function() cmd.cb({}) end)
+    end)
+  end)
+
+  describe("CodexDiffAcceptAll / CodexDiffDenyAll commands", function()
+    local diff_mock
+
+    before_each(function()
+      diff_mock = {
+        accept_all_calls = 0, deny_all_calls = 0,
+        accept_all = function() diff_mock.accept_all_calls = diff_mock.accept_all_calls + 1 end,
+        deny_all   = function() diff_mock.deny_all_calls   = diff_mock.deny_all_calls   + 1 end,
+      }
+      package.preload["codex.diff"] = function() return diff_mock end
+      codex.setup({})
+    end)
+
+    after_each(function()
+      package.preload["codex.diff"] = nil
+      package.loaded["codex.diff"] = nil
+    end)
+
+    it("CodexDiffAcceptAll calls diff.accept_all()", function()
+      local cmd = registered_cmds["CodexDiffAcceptAll"]
+      assert.is_not_nil(cmd)
+      cmd.cb({})
+      assert.equals(1, diff_mock.accept_all_calls)
+    end)
+
+    it("CodexDiffDenyAll calls diff.deny_all()", function()
+      local cmd = registered_cmds["CodexDiffDenyAll"]
+      assert.is_not_nil(cmd)
+      cmd.cb({})
+      assert.equals(1, diff_mock.deny_all_calls)
+    end)
+  end)
+
+  describe("CodexStatus command", function()
+    local captured
+
+    before_each(function()
+      captured = nil
+      codex.setup({})
+      vim.notify = function(msg, _level) captured = msg end
+    end)
+
+    it("includes approval policy in output", function()
+      registered_cmds["CodexStatus"].cb({})
+      assert.is_truthy(captured)
+      assert.is_truthy(captured:find("approval policy"))
+    end)
+
+    it("includes sandbox in output", function()
+      registered_cmds["CodexStatus"].cb({})
+      assert.is_truthy(captured:find("sandbox"))
+    end)
+
+    it("warns when sandbox is workspace-write", function()
+      codex.setup({ approval = { sandbox = "workspace-write" } })
+      registered_cmds["CodexStatus"].cb({})
+      assert.is_truthy(captured:find("AUTO%-APPLIES"))
+    end)
+
+    it("does NOT show workspace-write warning when sandbox is read-only", function()
+      codex.setup({ approval = { sandbox = "read-only" } })
+      registered_cmds["CodexStatus"].cb({})
+      assert.is_nil(captured:find("AUTO%-APPLIES"))
+    end)
+
+    it("shows 'not connected' when not connected", function()
+      registered_cmds["CodexStatus"].cb({})
+      assert.is_truthy(captured:find("not connected"))
     end)
   end)
 

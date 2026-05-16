@@ -224,12 +224,22 @@ local function create_commands()
   vim.api.nvim_create_user_command("CodexSend", send_handler, { range = true, desc = "Send selection to Codex" })
 
   vim.api.nvim_create_user_command("CodexDiffAccept", function()
-    require("codex.diff").accept_all()
-  end, { desc = "Accept pending Codex diff" })
+    -- Context-aware: in diffsplit mode accepts only the current tab's file;
+    -- in unified mode falls through to accept_all.
+    require("codex.diff").accept_current()
+  end, { desc = "Accept current Codex diff (file or all)" })
 
   vim.api.nvim_create_user_command("CodexDiffDeny", function()
+    require("codex.diff").deny_current()
+  end, { desc = "Deny current Codex diff (file or all)" })
+
+  vim.api.nvim_create_user_command("CodexDiffAcceptAll", function()
+    require("codex.diff").accept_all()
+  end, { desc = "Accept all pending Codex files" })
+
+  vim.api.nvim_create_user_command("CodexDiffDenyAll", function()
     require("codex.diff").deny_all()
-  end, { desc = "Deny pending Codex diff" })
+  end, { desc = "Deny all pending Codex files" })
 
   vim.api.nvim_create_user_command("CodexSelectModel", function()
     local models = (M.state.config and M.state.config.models) or {}
@@ -267,15 +277,33 @@ local function create_commands()
   end, { desc = "Stop Codex app-server" })
 
   vim.api.nvim_create_user_command("CodexStatus", function()
+    local lines = {}
     if is_connected() then
-      vim.notify(
-        "codex: connected" .. (M.state.port and " on port " .. M.state.port or ""),
-        vim.log.levels.INFO
-      )
+      lines[#lines + 1] = "connected" .. (M.state.port and (" on port " .. M.state.port) or "")
     else
-      vim.notify("codex: not connected", vim.log.levels.WARN)
+      lines[#lines + 1] = "not connected"
     end
-  end, { desc = "Show Codex connection status" })
+    local approval = (M.state.config and M.state.config.approval) or {}
+    lines[#lines + 1] = ("approval policy: %s"):format(approval.policy or "?")
+    lines[#lines + 1] = ("sandbox: %s"):format(approval.sandbox or "?")
+    if approval.sandbox == "workspace-write" then
+      lines[#lines + 1] = "  ⚠ workspace-write means codex AUTO-APPLIES in-workspace edits"
+      lines[#lines + 1] = "  ⚠ without showing the diff. Use sandbox='read-only' to require approval."
+    end
+    local ok_checker, checker = pcall(require, "codex.codex_config_check")
+    if ok_checker then
+      local home = os.getenv("HOME") or ""
+      if home ~= "" then
+        for _, w in ipairs(checker.warnings(checker.scan(home .. "/.codex/config.toml"))) do
+          lines[#lines + 1] = "  ⚠ " .. w
+        end
+      end
+    end
+    vim.notify(
+      "codex: " .. table.concat(lines, "\n  "),
+      is_connected() and vim.log.levels.INFO or vim.log.levels.WARN
+    )
+  end, { desc = "Show Codex connection + approval status" })
 end
 
 function M.setup(opts)
@@ -292,6 +320,13 @@ function M.setup(opts)
   create_commands()
 
   M.state.initialized = true
+
+  -- Warn if ~/.codex/config.toml has top-level approval_policy="never" or
+  -- sandbox_mode="danger-full-access" that would silently bypass the diff
+  -- approval flow. Best-effort; never blocks setup.
+  pcall(function()
+    require("codex.codex_config_check").check_and_warn()
+  end)
 
   if M.state.config.auto_start then
     start_server()

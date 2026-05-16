@@ -31,7 +31,11 @@ M.defaults = {
   },
   approval = {
     policy = "prompt",
-    sandbox = "workspace-write",
+    -- read-only forces codex to request approval for every edit, matching
+    -- claudecode.nvim's per-edit diff UX. workspace-write is Codex's "Auto
+    -- preset" — it silently auto-applies in-workspace edits and never
+    -- triggers the plugin's approval flow.
+    sandbox = "read-only",
   },
   models = {},
 }

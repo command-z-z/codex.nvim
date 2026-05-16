@@ -28,7 +28,7 @@ function M._deny_result(method)
 end
 
 function M._get_policy()
-  local ok, init = pcall(require, "codex.init")
+  local ok, init = pcall(require, "codex")
   if ok and init.state and init.state.config and init.state.config.approval then
     return init.state.config.approval.policy or "prompt"
   end

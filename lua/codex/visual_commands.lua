@@ -102,7 +102,7 @@ function M.handle_send(line1, line2)
     mention = file_path
   end
 
-  require("codex.init").enqueue_mention(mention)
+  require("codex").enqueue_mention(mention)
 end
 
 return M
